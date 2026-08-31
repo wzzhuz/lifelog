@@ -48,27 +48,39 @@ jobs:
             || (echo "❌ 缺少 app/debug.keystore" && exit 1)
 
       # 分步执行，便于定位失败发生在配置阶段还是编译阶段
+      # 注意：必须 set -o pipefail，否则「命令 | tail」的退出码永远是 tail 的 0，
+      # 编译失败也会被误判为成功。
       - name: 步骤 A：Gradle 自检（验证 wrapper 与插件能否解析）
         id: step_a
         continue-on-error: true
         run: |
-          echo "=== java ==="; java -version 2>&1
-          echo "=== gradle 版本 ==="; ./gradlew --version 2>&1 | tail -20
-          echo "=== 配置阶段自检 ==="
-          ./gradlew help --stacktrace --no-daemon 2>&1 | tail -60
+          set -o pipefail
+          mkdir -p diag
+          echo "=== java ==="                       2>&1 | tee diag/a_java.log
+          java -version                             2>&1 | tee -a diag/a_java.log
+          echo "=== gradle 版本 ==="                 2>&1 | tee -a diag/a_java.log
+          ./gradlew --version                       2>&1 | tee -a diag/a_java.log
+          echo "=== 配置阶段自检（./gradlew help）==="
+          ./gradlew help --stacktrace --no-daemon   2>&1 | tee diag/a_help.log
+          exit $?
 
       - name: 步骤 B：解析依赖
         id: step_b
         continue-on-error: true
         run: |
-          ./gradlew :app:dependencies --configuration debugRuntimeClasspath \
-            --stacktrace --no-daemon 2>&1 | tail -80
+          set -o pipefail
+          ./gradlew :app:dependencies \
+            --configuration debugRuntimeClasspath \
+            --stacktrace --no-daemon 2>&1 | tee diag/b_deps.log
+          exit $?
 
       - name: 步骤 C：编译 Debug APK
         id: step_c
         continue-on-error: true
         run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tail -200
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee diag/c_build.log
+          exit $?
 
       # 把日志打包，失败时能下载查看
       - name: 汇总诊断信息
@@ -86,8 +98,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: 诊断信息
-          path: diag/result.txt
+          name: 诊断日志
+          path: diag/
           if-no-files-found: warn
 
       # 编译失败时把关键信息发到 Issue，方便远程定位
