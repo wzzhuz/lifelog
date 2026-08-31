@@ -20,19 +20,28 @@
 | 语言 | Kotlin |
 | UI | Jetpack Compose（Material 3） |
 | 架构 | 单向数据流 + Repository，无 DI 框架 |
-| 持久化 | 本地 JSON 文件（`filesDir/lifelog.json`） |
+| 持久化 | Room（SQLite）+ KSP |
 | 小组件 | Glance |
 | 最低版本 | Android 8.0（API 26） |
 | 包名 | `com.zwz.lifelog` |
 
-**刻意不引入**：Room、Hilt/Koin、Coil/Glide。
-数据量小（个人记录，千级），JSON 文件直读直写更简单可控。
+**刻意不引入**：Hilt/Koin、Coil/Glide。
+
+**关于 Room**：初版用 JSON 全量文件，刻意避开 Room 是为了降低
+CI 首次编译的失败率（引入 KSP 注解处理器会增加复杂度）。
+这个取舍在数据量小时是对的，但「数据量小（千级）」的前提
+在高频记录场景下不成立——一天记 10 条，三年就上万，
+而 JSON 全量读写的开销随数据量**线性增长**。
+因此已迁移到 Room，详见 `changes/archive/` 中的迁移记录。
+
+仍不引入 Hilt/Koin、Coil/Glide：数据量与图片量都不需要。
 
 ## 已确认不做
 
 以下功能明确砍掉，提 change 时不要重新引入：
 
 - Quick Settings 磁贴（用户不需要锁屏记录）
+- JSON → Room 的数据迁移代码（试用阶段无历史数据，已按用户要求移除）
 - 到期提醒通知（用户习惯是主动打开查看，提醒是打扰）
 - 云同步、账号体系
 - 连续打卡、成就徽章、排行榜
