@@ -66,9 +66,11 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
 
-    val snap by repo.snapshotFlow().collectAsState(initial = null)
-    val eventCount = snap?.events?.size ?: 0
-    val recordCount = snap?.records?.size ?: 0
+    // 用专门的计数流，而不是 snapshotFlow()。
+    // 后者会把全部记录读进内存只为数一下有多少条——
+    // 记录上万时，进设置页会明显卡一下。
+    val eventCount by repo.eventCountFlow().collectAsState(initial = 0)
+    val recordCount by repo.recordCountFlow().collectAsState(initial = 0)
 
     // 导出 JSON
     val exportJsonLauncher = rememberLauncherForActivityResult(
