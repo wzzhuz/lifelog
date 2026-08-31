@@ -1,6 +1,5 @@
 package com.zwz.lifelog.ui.review
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,13 +10,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,47 +33,64 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.domain.model.Event
-import com.zwz.lifelog.domain.model.Record
 import java.util.Calendar
 
 data class YearStat(
     val event: Event,
     val count: Int,
-    val times: List<Long>
+    val monthLabels: List<String>
 )
+
+/** 取某个时间戳所属年份，避免复用 Calendar 实例带来的串扰。 */
+private fun yearOf(timestamp: Long): Int {
+    val cal = Calendar.getInstance()
+    cal.timeInMillis = timestamp
+    return cal.get(Calendar.YEAR)
+}
+
+/** 取某个时间戳的月份（1-12）。 */
+private fun monthOf(timestamp: Long): Int {
+    val cal = Calendar.getInstance()
+    cal.timeInMillis = timestamp
+    return cal.get(Calendar.MONTH) + 1
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun YearReviewScreen(repo: LifeLogRepository, onBack: () -> Unit) {
-    val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    var year by remember { mutableIntStateOf(currentYear) }
+    val currentYear: Int = remember { Calendar.getInstance().get(Calendar.YEAR) }
+    var year: Int by remember { mutableIntStateOf(currentYear) }
 
-    val data by produceState(initial = emptyList<YearStat>(), year, repo) {
+    // produceState 的参数名是 initialValue，不是 initial
+    val data: List<YearStat> by produceState(
+        initialValue = emptyList<YearStat>(),
+        key1 = year,
+        key2 = repo
+    ) {
         val snap = repo.allRaw()
-        val cal = Calendar.getInstance()
-        val list = snap.events
+        val list: List<YearStat> = snap.events
             .filter { !it.isArchived }
             .map { ev ->
-                val times = snap.records
-                    .filter { r ->
-                        r.eventId == ev.id && kotlin.run {
-                            cal.timeInMillis = r.timestamp
-                            cal.get(Calendar.YEAR) == year
-                        }
-                    }
-                    .map { it.timestamp }
+                val times: List<Long> = snap.records
+                    .filter { r -> r.eventId == ev.id && yearOf(r.timestamp) == year }
+                    .map { r -> r.timestamp }
                     .sorted()
-                YearStat(ev, times.size, times)
+                YearStat(
+                    event = ev,
+                    count = times.size,
+                    monthLabels = times.map { t -> "${monthOf(t)}月" }
+                )
             }
-            .filter { it.count > 0 }
-            .sortedByDescending { it.count }
+            .filter { stat -> stat.count > 0 }
+            .sortedByDescending { stat -> stat.count }
         value = list
     }
+
+    val totalCount: Int = data.sumOf { stat -> stat.count }
 
     Scaffold(
         topBar = {
@@ -99,7 +114,7 @@ fun YearReviewScreen(repo: LifeLogRepository, onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                IconButton(onClick = { year-- }) {
+                IconButton(onClick = { year = year - 1 }) {
                     Text("‹", style = MaterialTheme.typography.headlineMedium)
                 }
                 Text(
@@ -108,16 +123,18 @@ fun YearReviewScreen(repo: LifeLogRepository, onBack: () -> Unit) {
                     modifier = Modifier.width(100.dp),
                     textAlign = TextAlign.Center
                 )
-                IconButton(onClick = { if (year < currentYear) year++ }) {
+                IconButton(onClick = { if (year < currentYear) year = year + 1 }) {
                     Text("›", style = MaterialTheme.typography.headlineMedium)
                 }
             }
 
             if (data.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("$year 年还没有记录",
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "$year 年还没有记录",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             } else {
                 LazyColumn(
@@ -132,7 +149,7 @@ fun YearReviewScreen(repo: LifeLogRepository, onBack: () -> Unit) {
                         ) {
                             Column(modifier = Modifier.padding(18.dp)) {
                                 Text(
-                                    "$year 年，你一共记了 ${data.sumOf { it.count }} 笔",
+                                    "$year 年，你一共记了 $totalCount 笔",
                                     style = MaterialTheme.typography.titleLarge,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
@@ -145,7 +162,7 @@ fun YearReviewScreen(repo: LifeLogRepository, onBack: () -> Unit) {
                             }
                         }
                     }
-                    items(data, key = { it.event.id }) { st ->
+                    items(data, key = { stat -> stat.event.id }) { stat ->
                         Surface(
                             shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.surface,
@@ -156,20 +173,24 @@ fun YearReviewScreen(repo: LifeLogRepository, onBack: () -> Unit) {
                                 modifier = Modifier.padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(st.event.emoji, style = MaterialTheme.typography.titleLarge)
+                                Text(
+                                    stat.event.emoji,
+                                    style = MaterialTheme.typography.titleLarge
+                                )
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(st.event.name, style = MaterialTheme.typography.titleMedium)
                                     Text(
-                                        st.times.joinToString("、") { t ->
-                                            "${Calendar.getInstance().apply { timeInMillis = t }.get(Calendar.MONTH) + 1}月"
-                                        },
+                                        stat.event.name,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        stat.monthLabels.joinToString("、"),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Text(
-                                    "${st.count}",
+                                    "${stat.count}",
                                     style = MaterialTheme.typography.headlineMedium,
                                     color = MaterialTheme.colorScheme.primary
                                 )
