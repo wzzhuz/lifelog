@@ -35,12 +35,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.glance.appwidget.GlanceAppWidgetManager
-import androidx.glance.appwidget.state.updateAppWidgetState
-import androidx.glance.state.PreferencesGlanceStateDefinition
 import com.zwz.lifelog.di.ServiceLocator
 import com.zwz.lifelog.domain.model.Event
 import com.zwz.lifelog.ui.theme.LifeLogTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -58,44 +57,45 @@ class SingleWidgetConfigActivity : ComponentActivity() {
         ) ?: AppWidgetManager.INVALID_APPWIDGET_ID
 
         // 用户还没选就退出时，按规范返回取消结果
-        setResult(RESULT_CANCELED, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId))
+        setResult(
+            RESULT_CANCELED,
+            Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+        )
 
         setContent {
             LifeLogTheme {
                 ConfigScreen(
-                    onPicked = { event -> applyAndFinish(event) },
+                    onPicked = { event -> onEventPicked(event) },
                     onCancel = { finish() }
                 )
             }
         }
     }
 
-    private fun applyAndFinish(event: Event) {
-        val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.Main)
-        scope.launch {
-            if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+    private fun onEventPicked(event: Event) {
+        // 先落盘，保证小组件重建时也能读到
+        WidgetPrefs.setEventId(this, event.id)
+
+        val targetId = appWidgetId
+        kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+            if (targetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
                 val glanceId = withContext(Dispatchers.IO) {
                     runCatching {
                         GlanceAppWidgetManager(this@SingleWidgetConfigActivity)
-                            .getGlanceIdBy(appWidgetId)
+                            .getGlanceIdBy(targetId)
                     }.getOrNull()
                 }
                 if (glanceId != null) {
                     withContext(Dispatchers.IO) {
                         runCatching {
-                            updateAppWidgetState(
-                                this@SingleWidgetConfigActivity,
-                                PreferencesGlanceStateDefinition,
-                                glanceId
-                            ) { prefs ->
-                                prefs[SingleWidget.KEY_EVENT_ID] = event.id
-                            }
                             SingleWidget().update(this@SingleWidgetConfigActivity, glanceId)
                         }
                     }
                 }
-                val ok = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                setResult(RESULT_OK, ok)
+                setResult(
+                    RESULT_OK,
+                    Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, targetId)
+                )
             }
             Toast.makeText(this@SingleWidgetConfigActivity, "已选择：${event.name}", Toast.LENGTH_SHORT).show()
             finish()
@@ -134,16 +134,16 @@ private fun ConfigScreen(onPicked: (Event) -> Unit, onCancel: () -> Unit) {
         }
     ) { pad ->
         if (loading) {
-            Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
                 Text("加载中…")
             }
         } else if (events.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
                 Text("还没有事件，请先打开应用添加")
             }
         } else {
             LazyColumn(modifier = Modifier.padding(pad)) {
-                items(events) { ev ->
+                items(events, key = { it.id }) { ev ->
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -160,8 +160,11 @@ private fun ConfigScreen(onPicked: (Event) -> Unit, onCancel: () -> Unit) {
                             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(ev.name, style = MaterialTheme.typography.titleMedium)
                                 if (ev.tag != null) {
-                                    Text(ev.tag, style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        ev.tag,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
