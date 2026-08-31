@@ -1,0 +1,207 @@
+name: 编译 Release 包
+
+# 与 build.yml 的分工：
+#   build.yml    —— 每次 push 自动跑，产出 debug APK，用于日常开发验证
+#   本文件       —— 手动触发，产出正式签名（或回退 debug 签名）的 release APK，
+#                   可选自动打 tag 并创建 GitHub Release
+#
+# 触发方式：仓库 → Actions → 左侧选「编译 Release 包」→ 右侧 Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: '版本号（留空则读取 build.gradle.kts 里的 versionName）'
+        required: false
+        type: string
+        default: ''
+      create_release:
+        description: '编译后自动打 tag 并创建 GitHub Release'
+        required: false
+        type: boolean
+        default: true
+      minify:
+        description: '开启 R8 代码混淆与资源压缩（可能增加小组件出问题的风险）'
+        required: false
+        type: boolean
+        default: false
+      build_aab:
+        description: '同时编译 AAB（上架 Google Play 用，国内一般用不到）'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 编译 Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 配置 Gradle 8.13（带依赖缓存）
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      # ---------------------------------------------------------------
+      # 签名处理
+      #
+      # 推荐：把正式密钥转成 base64 存进 Secrets（RELEASE_KEYSTORE_BASE64），
+      #       再配 KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD 三项。
+      #       这样密钥不进仓库，且各版本签名一致，能覆盖升级。
+      #
+      # 未配置时：自动回退用仓库里的 debug.keystore。
+      #           能用，但任何拿到你仓库的人都能签出「同名同签名」的包，
+      #           所以仅供自用测试，不建议对外分发。
+      # ---------------------------------------------------------------
+      - name: 准备签名密钥
+        run: |
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            echo "$RELEASE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/lifelog-release.keystore"
+            echo "LIFELOG_KEYSTORE_FILE=$RUNNER_TEMP/lifelog-release.keystore" >> $GITHUB_ENV
+            echo "LIFELOG_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "LIFELOG_KEY_ALIAS=${{ secrets.KEY_ALIAS }}"             >> $GITHUB_ENV
+            echo "LIFELOG_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}"       >> $GITHUB_ENV
+            echo "✅ 使用 Secrets 中的正式签名密钥"
+          else
+            echo "⚠️  未配置 RELEASE_KEYSTORE_BASE64，将回退使用仓库内的 debug.keystore"
+            echo "   签名可用但非专用密钥，仅供自用测试，不建议对外分发"
+          fi
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+
+      - name: 确定版本号
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version_name }}" ]; then
+            V="${{ inputs.version_name }}"
+          else
+            V=$(grep -m1 -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          fi
+          V="${V#v}"
+          echo "version=$V" >> $GITHUB_OUTPUT
+          echo "版本号: $V"
+
+      - name: 编译 Release APK
+        run: |
+          if [ "${{ inputs.minify }}" = "true" ]; then
+            gradle assembleRelease -PminifyRelease=true --stacktrace --no-daemon
+          else
+            gradle assembleRelease --stacktrace --no-daemon
+          fi
+
+      - name: 编译 AAB
+        if: inputs.build_aab
+        run: gradle bundleRelease --stacktrace --no-daemon
+
+      - name: 重命名产物
+        id: rename
+        run: |
+          cd app/build/outputs/apk/release
+          APK="生活手记-v${{ steps.ver.outputs.version }}.apk"
+          mv app-release.apk "$APK"
+          ls -lh
+          echo "apk_name=$APK" >> $GITHUB_OUTPUT
+          echo "sha256=$(sha256sum "$APK" | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "size=$(du -h "$APK" | cut -f1)" >> $GITHUB_OUTPUT
+
+      - name: 校验签名信息
+        run: |
+          keytool -printcert -jarfile "app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}" 2>/dev/null \
+            || jarsigner -verify -verbose -certs "app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}" | head -20
+
+      - name: 上传 Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: 生活手记-release-${{ steps.ver.outputs.version }}
+          path: app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}
+          retention-days: 365
+          if-no-files-found: error
+
+      - name: 上传 AAB
+        if: inputs.build_aab
+        uses: actions/upload-artifact@v4
+        with:
+          name: 生活手记-aab-${{ steps.ver.outputs.version }}
+          path: app/build/outputs/bundle/release/app-release.aab
+          retention-days: 365
+          if-no-files-found: error
+
+      # ---------------------------------------------------------------
+      # 可选：自动打 tag 并发布 Release
+      # ---------------------------------------------------------------
+      - name: 创建 tag 并发布 Release
+        if: inputs.create_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          APK="app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # tag 已存在则先删除，保证重复发布同一版本时能被覆盖
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            git push origin --delete "$TAG" || true
+          fi
+          git tag -f "$TAG"
+          git push origin "$TAG"
+
+          {
+            echo "生活手记 $TAG"
+            echo ""
+            echo "自动编译的 Release 版本。"
+            echo ""
+            echo "**安装提示**"
+            echo "- 下载下方 APK 传到手机，允许「未知来源应用」后安装"
+            echo ""
+            echo "**安全提示**"
+            if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+              echo "- 使用专用 release 密钥签名，与旧版本签名一致可直接覆盖升级"
+            else
+              echo "- ⚠️ 本包使用仓库内的 debug 密钥签名（未配置 RELEASE_KEYSTORE_BASE64）"
+              echo "- 该密钥是公开的，任何人都能签出同名同签名的包，请勿对外分发"
+            fi
+            echo ""
+            echo "**校验信息**"
+            echo "- 文件大小：${{ steps.rename.outputs.size }}"
+            echo "- SHA256：\`${{ steps.rename.outputs.sha256 }}\`"
+          } > /tmp/notes.md
+
+          gh release create "$TAG" "$APK" \
+            --title "生活手记 $TAG" \
+            --notes-file /tmp/notes.md \
+            || gh release edit "$TAG" --notes-file /tmp/notes.md \
+               && gh release upload "$TAG" "$APK" --clobber
+
+      - name: 输出摘要
+        run: |
+          echo "### Release 编译完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 版本：v${{ steps.ver.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 大小：${{ steps.rename.outputs.size }}" >> $GITHUB_STEP_SUMMARY
+          echo "- SHA256：\`${{ steps.rename.outputs.sha256 }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 混淆：${{ inputs.minify }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.create_release }}" = "true" ]; then
+            echo "已发布到 [Releases](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "未勾选发布，产物在下方 **Artifacts** 区域下载。" >> $GITHUB_STEP_SUMMARY
+          fi
