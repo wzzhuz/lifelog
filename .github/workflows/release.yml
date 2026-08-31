@@ -99,12 +99,46 @@ jobs:
           echo "版本号: $V"
 
       - name: 编译 Release APK
+        id: build_release
+        continue-on-error: true
         run: |
+          set -o pipefail
+          mkdir -p diag
           if [ "${{ inputs.minify }}" = "true" ]; then
-            gradle assembleRelease -PminifyRelease=true --stacktrace --no-daemon
+            gradle assembleRelease -PminifyRelease=true --stacktrace --no-daemon 2>&1 | tee diag/release_build.log
           else
-            gradle assembleRelease --stacktrace --no-daemon
+            gradle assembleRelease --stacktrace --no-daemon 2>&1 | tee diag/release_build.log
           fi
+          exit $?
+
+      - name: 回传诊断日志（临时排查用）
+        if: steps.build_release.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          set +e
+          git config user.name  "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git checkout -B ci-diagnostics 2>/dev/null
+          mkdir -p ci-logs
+          {
+            echo "=== 概要 ==="
+            echo "commit : ${{ github.sha }}"
+            echo "run    : ${{ github.run_number }}"
+            echo "minify : ${{ inputs.minify }}"
+            echo
+            echo "=== Release 编译日志（末尾 400 行）==="
+            tail -n 400 diag/release_build.log 2>/dev/null
+          } > "ci-logs/release-run-${{ github.run_number }}.txt"
+          git add ci-logs
+          git commit -q -m "ci: release run ${{ github.run_number }} 诊断日志" && \
+            git push -q origin ci-diagnostics --force && echo "日志已回传" \
+            || echo "日志回传失败"
+
+      - name: 判定编译结果
+        if: steps.build_release.outcome == 'failure'
+        run: |
+          echo "Release 编译失败，详见上方日志"
+          exit 1
 
       - name: 编译 AAB
         if: inputs.build_aab
