@@ -37,6 +37,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -44,7 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zwz.lifelog.data.LifeLogRepository
+import com.zwz.lifelog.data.TemplateFileParser
+import com.zwz.lifelog.data.TemplateParseResult
 import com.zwz.lifelog.data.ThemePrefs
+import com.zwz.lifelog.domain.model.Template
+import com.zwz.lifelog.domain.model.Templates
 import com.zwz.lifelog.util.BackupZip
 import com.zwz.lifelog.util.CsvExport
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +66,9 @@ import java.util.Locale
 fun SettingsScreen(
     repo: LifeLogRepository,
     onBack: () -> Unit,
-    onOpenYearReview: () -> Unit
+    onOpenYearReview: () -> Unit,
+    onOpenUsageGuide: () -> Unit,
+    onDataChanged: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -71,6 +79,53 @@ fun SettingsScreen(
     // 记录上万时，进设置页会明显卡一下。
     val eventCount by repo.eventCountFlow().collectAsState(initial = 0)
     val recordCount by repo.recordCountFlow().collectAsState(initial = 0)
+
+    // 模板导入相关
+    var showTemplatePicker by remember { mutableStateOf(false) }
+    var existingNames by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pendingExternal by remember { mutableStateOf<List<Template>?>(null) }
+    var pendingSourceName by remember { mutableStateOf("") }
+
+    // 导入外部模板文件（JSON）
+    val importTemplateLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+            }.getOrNull()
+
+            if (text.isNullOrBlank()) {
+                withContext(Dispatchers.Main) { snack.showSnackbar("读取文件失败") }
+                return@launch
+            }
+
+            when (val r = TemplateFileParser.parse(text)) {
+                is TemplateParseResult.Ok -> {
+                    val names = repo.allEvents().map { it.name }.toSet()
+                    withContext(Dispatchers.Main) {
+                        existingNames = names
+                        pendingExternal = r.file.templates
+                        pendingSourceName = uri.lastPathSegment ?: "模板文件"
+                    }
+                }
+                is TemplateParseResult.WrongType -> {
+                    withContext(Dispatchers.Main) {
+                        snack.showSnackbar(
+                            if (r.actualType == null) "这不是模板文件（缺少 type 字段）"
+                            else "这是 ${r.actualType}，不是模板文件"
+                        )
+                    }
+                }
+                is TemplateParseResult.BadFormat -> {
+                    withContext(Dispatchers.Main) {
+                        snack.showSnackbar("模板格式有误：${r.detail}")
+                    }
+                }
+            }
+        }
+    }
 
     // 导出 JSON
     val exportJsonLauncher = rememberLauncherForActivityResult(
@@ -194,6 +249,34 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(22.dp))
+            SectionTitle("模板")
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        existingNames = repo.allEvents().map { it.name }.toSet()
+                        showTemplatePicker = true
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) { Text("从内置模板导入（${Templates.ALL.size} 个）") }
+
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = { importTemplateLauncher.launch(arrayOf("application/json", "text/*")) },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) { Text("从文件导入模板（JSON）") }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "模板就是预置的事件，导入后和普通事件一样可以改名、删除。" +
+                    "同名事件不会重复导入。",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(24.dp))
             SectionTitle("备份与恢复")
             OutlinedButton(
                 onClick = { exportJsonLauncher.launch(defaultName("json")) },
@@ -258,6 +341,14 @@ fun SettingsScreen(
             ) { Text("年度回顾") }
 
             Spacer(Modifier.height(24.dp))
+            SectionTitle("帮助")
+            OutlinedButton(
+                onClick = onOpenUsageGuide,
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) { Text("使用说明（状态色 · 判断基准 · 补录）") }
+
+            Spacer(Modifier.height(24.dp))
             SectionTitle("关于")
             Text(
                 "生活手记 v1.0.0\n包名 com.zwz.lifelog\n\n完全离线运行，不申请网络权限，无广告、无统计、无账号。\n源码开源，你可以在自己的 GitHub 上自由修改。",
@@ -269,6 +360,46 @@ fun SettingsScreen(
         }
     }
 }
+
+    // 内置模板导入
+    if (showTemplatePicker) {
+        TemplatePickerSheet(
+            templates = Templates.ALL,
+            existingNames = existingNames,
+            onDismiss = { showTemplatePicker = false },
+            onConfirm = { selected ->
+                showTemplatePicker = false
+                scope.launch {
+                    val n = repo.importTemplates(selected)
+                    onDataChanged()
+                    snack.showSnackbar(
+                        if (n > 0) "已导入 $n 个事件" else "没有新事件可导入"
+                    )
+                }
+            }
+        )
+    }
+
+    // 外部模板文件导入（先预览再确认）
+    pendingExternal?.let { list ->
+        ExternalTemplatePreviewSheet(
+            templates = list,
+            existingNames = existingNames,
+            sourceName = pendingSourceName,
+            onDismiss = { pendingExternal = null },
+            onConfirm = {
+                val toImport = list
+                pendingExternal = null
+                scope.launch {
+                    val n = repo.importExternalTemplates(toImport)
+                    onDataChanged()
+                    snack.showSnackbar(
+                        if (n > 0) "已导入 $n 个事件" else "没有新事件可导入"
+                    )
+                }
+            }
+        )
+    }
 
 @Composable
 private fun StatCard(value: String, label: String, modifier: Modifier = Modifier) {
