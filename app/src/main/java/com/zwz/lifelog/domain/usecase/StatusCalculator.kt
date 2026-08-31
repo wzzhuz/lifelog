@@ -2,6 +2,7 @@ package com.zwz.lifelog.domain.usecase
 
 import com.zwz.lifelog.domain.model.Event
 import com.zwz.lifelog.domain.model.EventStatus
+import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Freshness
 import com.zwz.lifelog.domain.model.Record
 import kotlin.math.roundToInt
@@ -30,6 +31,71 @@ object StatusCalculator {
         val span: Long = recordsAsc.last().timestamp - recordsAsc.first().timestamp
         if (span <= 0L) return null
         return span / (recordsAsc.size - 1).toLong()
+    }
+
+    /**
+     * 基于聚合统计计算状态，不加载记录列表。
+     *
+     * 用于首页列表：数据库层用 `COUNT / MIN / MAX` 直接算出这三个值，
+     * 避免把该事件的上千条历史记录读进内存再遍历。
+     *
+     * @param count    记录条数
+     * @param firstAsc 最早一次记录的时间戳（无记录时为 null）
+     * @param lastAsc  最近一次记录的时间戳（无记录时为 null）
+     */
+    fun computeLite(
+        event: Event,
+        count: Int,
+        firstAsc: Long?,
+        lastAsc: Long?,
+        now: Long = System.currentTimeMillis()
+    ): EventStatusLite {
+        // 相邻间隔数 = 条数 - 1；跨度 ÷ 间隔数 = 平均间隔
+        val avg: Long? = if (count >= 2 && firstAsc != null && lastAsc != null) {
+            val span = lastAsc - firstAsc
+            if (span > 0L) span / (count - 1).toLong() else null
+        } else null
+
+        val baselineDays: Float = when {
+            event.targetDays != null && event.targetDays > 0 -> event.targetDays.toFloat()
+            avg != null && avg > 0L -> (avg.toFloat() / DAY_MILLIS.toFloat())
+            else -> DEFAULT_BASELINE_DAYS.toFloat()
+        }
+        val safeBaseline: Float = if (baselineDays < 1f) 1f else baselineDays
+
+        if (lastAsc == null) {
+            return EventStatusLite(
+                event = event,
+                recordCount = 0,
+                lastTimestamp = null,
+                daysSince = null,
+                avgGapMillis = null,
+                baselineDays = safeBaseline.roundToInt(),
+                freshness = Freshness.NONE,
+                ratio = 0f,
+                predictedNextMillis = null
+            )
+        }
+
+        val d: Int = daysSince(lastAsc, now)
+        val ratio: Float = d.toFloat() / safeBaseline
+        val freshness: Freshness = when {
+            ratio >= 1f -> Freshness.DUE
+            ratio >= 0.75f -> Freshness.SOON
+            else -> Freshness.FRESH
+        }
+
+        return EventStatusLite(
+            event = event,
+            recordCount = count,
+            lastTimestamp = lastAsc,
+            daysSince = d,
+            avgGapMillis = avg,
+            baselineDays = safeBaseline.roundToInt(),
+            freshness = freshness,
+            ratio = ratio,
+            predictedNextMillis = lastAsc + (safeBaseline * DAY_MILLIS.toFloat()).toLong()
+        )
     }
 
     fun compute(
