@@ -32,11 +32,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 配置 Gradle（带依赖缓存）
+      # 显式指定 Gradle 版本并绕开 wrapper。
+      # 仓库里的 gradle-wrapper.jar 不可用（不是真正的 wrapper 实现类），
+      # 交给 setup-gradle 安装官方发行版，行为更可控。
+      - name: 配置 Gradle 8.13（带依赖缓存）
         uses: gradle/actions/setup-gradle@v4
-
-      - name: 给 gradlew 加执行权限
-        run: chmod +x ./gradlew
+        with:
+          gradle-version: '8.13'
 
       # 关键：debug.keystore 已提交在仓库里（app/debug.keystore）。
       # 这样每次 CI 编译出的 APK 都使用同一份签名，新版本可以直接覆盖安装。
@@ -59,9 +61,9 @@ jobs:
           echo "=== java ==="                       2>&1 | tee diag/a_java.log
           java -version                             2>&1 | tee -a diag/a_java.log
           echo "=== gradle 版本 ==="                 2>&1 | tee -a diag/a_java.log
-          ./gradlew --version                       2>&1 | tee -a diag/a_java.log
+          gradle --version                       2>&1 | tee -a diag/a_java.log
           echo "=== 配置阶段自检（./gradlew help）==="
-          ./gradlew help --stacktrace --no-daemon   2>&1 | tee diag/a_help.log
+          gradle help --stacktrace --no-daemon   2>&1 | tee diag/a_help.log
           exit $?
 
       - name: 步骤 B：解析依赖
@@ -69,7 +71,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          ./gradlew :app:dependencies \
+          gradle :app:dependencies \
             --configuration debugRuntimeClasspath \
             --stacktrace --no-daemon 2>&1 | tee diag/b_deps.log
           exit $?
@@ -79,7 +81,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee diag/c_build.log
+          gradle assembleDebug --stacktrace --no-daemon 2>&1 | tee diag/c_build.log
           exit $?
 
       # 把日志打包，失败时能下载查看
