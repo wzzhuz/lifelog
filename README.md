@@ -1,4 +1,7 @@
-# 生活手记（LifeLog）
+# 生活手记
+
+> 📋 **改动需求请先读 [`openspec/AGENTS.md`](openspec/AGENTS.md)。**
+> `openspec/specs/` 是系统当前行为的唯一真理源。（LifeLog）
 
 一个**纯本地、零账号、无网络权限**的生活琐事记录器，用来回答一个问题：
 
