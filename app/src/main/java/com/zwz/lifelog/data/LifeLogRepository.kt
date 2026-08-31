@@ -2,7 +2,6 @@ package com.zwz.lifelog.data
 
 import android.content.Context
 import android.net.Uri
-import com.zwz.lifelog.data.db.JsonToRoomMigrator
 import com.zwz.lifelog.data.db.LifeLogDatabase
 import com.zwz.lifelog.data.db.RecordEntity
 import com.zwz.lifelog.data.db.toDomain
@@ -11,6 +10,7 @@ import com.zwz.lifelog.domain.model.Event
 import com.zwz.lifelog.domain.model.EventStatus
 import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Record
+import com.zwz.lifelog.domain.model.Template
 import com.zwz.lifelog.domain.model.Templates
 import com.zwz.lifelog.domain.usecase.StatusCalculator
 import kotlinx.coroutines.Dispatchers
@@ -255,11 +255,23 @@ class LifeLogRepository(private val context: Context) {
 
     /** 导入模板：只导入当前还不存在的同名事件。 */
     suspend fun importTemplates(names: Set<String>): Int = withContext(Dispatchers.IO) {
+        insertTemplates(Templates.ALL.filter { it.name in names })
+    }
+
+    /**
+     * 导入外部模板文件里的模板。
+     *
+     * 同名事件跳过，只返回实际新增的条数供 UI 提示。
+     */
+    suspend fun importExternalTemplates(templates: List<Template>): Int =
+        withContext(Dispatchers.IO) { insertTemplates(templates) }
+
+    private suspend fun insertTemplates(templates: List<Template>): Int {
         val existing = dao.allEvents().map { it.name }.toSet()
         val maxSort = dao.allEvents().maxOfOrNull { it.sortOrder } ?: 0
         var added = 0
-        Templates.ALL
-            .filter { it.name in names && it.name !in existing }
+        templates
+            .filter { it.name !in existing }
             .forEachIndexed { index, t ->
                 dao.upsertEvent(
                     Event(
@@ -272,7 +284,7 @@ class LifeLogRepository(private val context: Context) {
                 )
                 added++
             }
-        added
+        return added
     }
 
     // ------------------------------------------------------------------
@@ -329,11 +341,13 @@ class LifeLogRepository(private val context: Context) {
     }
 
     /**
-     * 启动时调用：建库 + 必要时把旧 JSON 导入数据库。
+     * 启动时调用，保留以满足既有调用点（小组件、Application）。
+     *
+     * **不做数据迁移**：本项目尚在试用阶段，没有需要保留的历史数据，
+     * 从 JSON 搬家的逻辑已按使用者要求移除。Room 自身在首次访问时才建库，
+     * 因此这里不需要做任何事。
      */
-    suspend fun load() = withContext(Dispatchers.IO) {
-        JsonToRoomMigrator.migrateIfNeeded(context, dao)
-    }
+    suspend fun load() = withContext(Dispatchers.IO) { Unit }
 
     /** 事件总数流（设置页统计）。 */
     fun eventCountFlow(): Flow<Int> = dao.observeEventCount()
