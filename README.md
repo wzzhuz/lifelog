@@ -24,6 +24,48 @@
 
 > 也可以手动触发：Actions 页面 → 右侧 `Run workflow`。
 
+### 出正式 Release 包
+
+日常验证用上面的 debug 包就够。需要对外分发时用另一个 workflow：
+
+**Actions → 左侧「编译 Release 包」→ 右侧 Run workflow**
+
+| 选项 | 说明 |
+|---|---|
+| 版本号 | 留空则读 `build.gradle.kts` 里的 `versionName` |
+| 自动发布 | 勾选后自动打 tag 并创建 GitHub Release |
+| 开启混淆 | 默认关闭。Glance 小组件依赖反射，开 R8 有风险 |
+| 编译 AAB | 上架 Google Play 用，国内一般用不到 |
+
+**关于签名（重要）**
+
+未做任何配置时，Release 包会**回退使用仓库里的 `debug.keystore`**。
+能用，但那把密钥是公开的 —— 任何人都能签出「同名同签名」的包冒充你的应用。
+自用无所谓，**对外分发请务必配置专用密钥**：
+
+```bash
+# 1. 本地生成（务必保存好，丢了将来无法覆盖升级安装）
+keytool -genkeypair -v \
+  -keystore lifelog-release.keystore \
+  -storetype PKCS12 -storepass 你的密码 -keypass 你的密码 \
+  -alias lifelog -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=LifeLog, OU=Personal, O=LifeLog, L=CN, S=CN, C=CN"
+
+# 2. 转成 base64 单行
+base64 -w 0 lifelog-release.keystore > keystore.b64
+```
+
+然后到仓库 **Settings → Secrets and variables → Actions** 添加 4 个 Secret：
+
+| Secret | 值 |
+|---|---|
+| `RELEASE_KEYSTORE_BASE64` | `keystore.b64` 的全部内容 |
+| `KEYSTORE_PASSWORD` | 上面设的 storepass |
+| `KEY_ALIAS` | `lifelog` |
+| `KEY_PASSWORD` | 上面设的 keypass |
+
+配好后重跑一次，日志会显示「使用 Secrets 中的正式签名密钥」。
+
 ### 2. 安装
 
 - Android 8.0（API 26）及以上
