@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 相机：仅用于给记录拍照（可选功能，无相机设备自动降级为只能选图） -->
+    <uses-permission android:name="android.permission.CAMERA"
+        tools:node="merge" />
+    <!-- 相册读取：Android 13+ 用细分媒体权限，以下为 Android 12 及以下 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:node="merge" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"
+        tools:node="merge" />
+
+    <!--
+      有意不声明 android.permission.INTERNET。
+      本应用完全离线运行，不联网、不上传、不含任何统计或广告 SDK。
+    -->
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <application
+        android:name=".LifeLogApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="false"
+        android:theme="@style/Theme.LifeLog"
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="36">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.LifeLog"
+            android:windowSoftInputMode="adjustResize"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- 应用快捷方式：长按桌面图标弹出 -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- 桌面小组件：列表型 -->
+        <receiver
+            android:name=".widget.ListWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_list_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_list_info" />
+        </receiver>
+
+        <!-- 桌面小组件：单事件型 -->
+        <receiver
+            android:name=".widget.SingleWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_single_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_single_info" />
+        </receiver>
+
+        <!-- 小组件配置 Activity（单事件型需要选择具体事件） -->
+        <activity
+            android:name=".widget.SingleWidgetConfigActivity"
+            android:exported="true"
+            android:theme="@style/Theme.LifeLog"
+            android:label="@string/widget_single_config_title">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <!-- 快捷方式跳转目标：静默记录后直接退出，不闪主界面 -->
+        <activity
+            android:name=".widget.QuickRecordActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/quick_record" />
+    </application>
+
+</manifest>

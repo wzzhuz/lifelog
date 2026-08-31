@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <include domain="file" path="lifelog.json" />
+    <include domain="file" path="photos/" />
+    <exclude domain="file" path="backups/" />
+</full-backup-content>
