@@ -112,6 +112,20 @@ object Templates {
         Template("换毛巾", "\uD83E\uDDFC", 30, "家务"),
         Template("清理冰箱", "\uD83E\uDDCA", 90, "家务"),
         Template("换机油", "\uD83D\uDEE2\uFE0F", 180, "汽车"),
-        Template("整理照片", "\uD83D\uDCF7", 90, "数码")
+        Template("整理照片", "\uD83D\uDCF7", 90, "数码"),
+
+        // ---- 健康调理 ----
+        Template("吃药", "\uD83D\uDC8A", 1, "健康"),
+        Template("中药调理", "\uD83C\uDF75", null, "健康"),
+        Template("针灸", "\uD83E\uDEA8", null, "健康"),
+        Template("贴膏药", "\uD83E\uDDF4", null, "健康"),
+        Template("量血压", "\uD83E\uDED0", 7, "健康"),
+        Template("测血糖", "\uD83E\uDE78", 7, "健康"),
+
+        // ---- 夫妻日常 ----
+        Template("同房", "\uD83D\uDC97", null, "夫妻"),
+        Template("约会", "\uD83C\uDF77", 30, "夫妻"),
+        Template("结婚纪念日", "\uD83D\uDC8D", 365, "夫妻"),
+        Template("一起看电影", "\uD83C\uDFAC", 30, "夫妻")
     )
 }
