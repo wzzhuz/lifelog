@@ -5,7 +5,6 @@ import com.zwz.lifelog.domain.model.EventStatus
 import com.zwz.lifelog.domain.model.Freshness
 import com.zwz.lifelog.domain.model.Record
 import kotlin.math.roundToInt
-import kotlin.math.roundToLong
 
 /**
  * 事件状态计算 —— 整个应用的核心逻辑。
@@ -19,14 +18,18 @@ object StatusCalculator {
     private const val DAY_MILLIS = 86_400_000L
     private const val DEFAULT_BASELINE_DAYS = 30
 
-    fun daysSince(timestamp: Long, now: Long = System.currentTimeMillis()): Int =
-        ((now - timestamp) / DAY_MILLIS).toInt().coerceAtLeast(0)
+    fun daysSince(timestamp: Long, now: Long = System.currentTimeMillis()): Int {
+        val diff = now - timestamp
+        if (diff <= 0L) return 0
+        return (diff / DAY_MILLIS).toInt()
+    }
 
-    /** 相邻记录的间隔，按时间升序；只有一条记录时返回 null。 */
+    /** 相邻两次记录的平均间隔（毫秒）。记录不足两条时返回 null。 */
     fun averageGapMillis(recordsAsc: List<Record>): Long? {
         if (recordsAsc.size < 2) return null
-        val span = recordsAsc.last().timestamp - recordsAsc.first().timestamp
-        return (span / (recordsAsc.size - 1)).roundToLong()
+        val span: Long = recordsAsc.last().timestamp - recordsAsc.first().timestamp
+        if (span <= 0L) return null
+        return span / (recordsAsc.size - 1).toLong()
     }
 
     fun compute(
@@ -34,8 +37,8 @@ object StatusCalculator {
         recordsAsc: List<Record>,
         now: Long = System.currentTimeMillis()
     ): EventStatus {
-        val last = recordsAsc.lastOrNull()?.timestamp
-        val avg = averageGapMillis(recordsAsc)
+        val last: Long? = recordsAsc.lastOrNull()?.timestamp
+        val avg: Long? = averageGapMillis(recordsAsc)
 
         if (last == null) {
             return EventStatus(
@@ -51,19 +54,27 @@ object StatusCalculator {
             )
         }
 
-        val d = daysSince(last, now)
-        val baseline = event.targetDays ?: (avg?.let { (it / DAY_MILLIS).toFloat() }
-            ?: DEFAULT_BASELINE_DAYS.toFloat())
-        val safeBaseline = baseline.coerceAtLeast(1f)
-        val ratio = d / safeBaseline
+        val d: Int = daysSince(last, now)
 
-        val freshness = when {
-            ratio >= 1f -> Freshness.DUE
-            ratio >= 0.75f -> Freshness.SOON
-            else -> Freshness.FRESH
+        // 基准天数：优先用用户设定；其次用历史平均；都没有则兜底 30 天
+        val baselineDays: Float = when {
+            event.targetDays != null && event.targetDays > 0 -> event.targetDays.toFloat()
+            avg != null && avg > 0L -> (avg.toFloat() / DAY_MILLIS.toFloat())
+            else -> DEFAULT_BASELINE_DAYS.toFloat()
+        }
+        val safeBaseline: Float = if (baselineDays < 1f) 1f else baselineDays
+
+        val ratio: Float = d.toFloat() / safeBaseline
+
+        val freshness: Freshness = if (ratio >= 1f) {
+            Freshness.DUE
+        } else if (ratio >= 0.75f) {
+            Freshness.SOON
+        } else {
+            Freshness.FRESH
         }
 
-        val next = last + (safeBaseline * DAY_MILLIS).toLong()
+        val predicted: Long = last + (safeBaseline * DAY_MILLIS.toFloat()).toLong()
 
         return EventStatus(
             event = event,
@@ -74,7 +85,7 @@ object StatusCalculator {
             baselineDays = safeBaseline.roundToInt(),
             freshness = freshness,
             ratio = ratio,
-            predictedNextMillis = next
+            predictedNextMillis = predicted
         )
     }
 }
