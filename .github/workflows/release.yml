@@ -8,6 +8,9 @@ name: 编译 Release 包
 # 触发方式：仓库 → Actions → 左侧选「编译 Release 包」→ 右侧 Run workflow
 
 on:
+  # 临时：排查用，定位后删除
+  push:
+    branches: [ci-release-probe]
   workflow_dispatch:
     inputs:
       version_name:
