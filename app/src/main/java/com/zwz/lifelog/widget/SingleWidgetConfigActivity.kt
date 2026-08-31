@@ -114,7 +114,7 @@ private fun ConfigScreen(onPicked: (Event) -> Unit, onCancel: () -> Unit) {
         withContext(Dispatchers.IO) {
             val repo = ServiceLocator.provideRepository(context)
             repo.load()
-            val list = repo.allRaw().events.filter { !it.isArchived }.sortedBy { it.name }
+            val list = repo.allEvents().filter { !it.isArchived }.sortedBy { it.name }
             withContext(Dispatchers.Main) {
                 events.clear()
                 events.addAll(list)
