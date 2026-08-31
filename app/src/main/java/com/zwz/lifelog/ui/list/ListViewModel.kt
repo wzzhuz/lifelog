@@ -3,56 +3,82 @@ package com.zwz.lifelog.ui.list
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.zwz.lifelog.data.LifeLogRepository
-import com.zwz.lifelog.domain.model.EventStatus
+import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Freshness
 import com.zwz.lifelog.domain.model.Templates
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class Filter { ALL, DUE, NONE, PINNED }
 
-data class ListUiState(
-    val all: List<EventStatus> = emptyList(),
+/**
+ * 查询条件聚合。
+ *
+ * 把关键词、筛选、标签合并成一个对象，是为了让 `combine` 的参数
+ * 保持在它支持的个数内（Kotlin 的 combine 最多 5 个流）。
+ */
+private data class QueryState(
     val keyword: String = "",
+    /** 备注全文搜索命中的事件 id；null 表示没有关键词，无需过滤 */
+    val searchHits: Set<Long>? = null,
+    val filter: Filter = Filter.ALL,
+    val tag: String? = null
+)
+
+data class ListUiState(
+    val all: List<EventStatusLite> = emptyList(),
+    val keyword: String = "",
+    /** 备注全文搜索命中的事件 id（异步到达） */
+    val searchHits: Set<Long>? = null,
     val filter: Filter = Filter.ALL,
     val tagFilter: String? = null,
     val showTemplatePicker: Boolean = false,
     val pendingUndo: Pair<Long, Long>? = null   // (recordId, eventId)
 ) {
-    val visible: List<EventStatus> get() = filtered(all, keyword, filter, tagFilter)
+    val visible: List<EventStatusLite> get() = filtered(all, keyword, searchHits, filter, tagFilter)
 
     val allTags: List<String> get() = all.mapNotNull { it.event.tag }.distinct().sorted()
 
     companion object {
         fun filtered(
-            all: List<EventStatus>,
+            all: List<EventStatusLite>,
             keyword: String,
+            searchHits: Set<Long>?,
             filter: Filter,
             tag: String?
-        ): List<EventStatus> {
+        ): List<EventStatusLite> {
             var list = all
             val kw = keyword.trim()
             if (kw.isNotBlank()) {
+                // 事件名与标签在内存里直接匹配（只有几十个事件，立即响应）；
+                // 备注全文由 SQL 查出命中的 id 集合，异步到达后自动补充。
                 list = list.filter { s ->
                     s.event.name.contains(kw, ignoreCase = true) ||
-                            s.records.any { (it.note ?: "").contains(kw, ignoreCase = true) } ||
-                            (s.event.tag ?: "").contains(kw, ignoreCase = true)
+                            (s.event.tag ?: "").contains(kw, ignoreCase = true) ||
+                            (searchHits?.contains(s.event.id) ?: false)
                 }
             }
             if (tag != null) list = list.filter { it.event.tag == tag }
             list = when (filter) {
                 Filter.ALL -> list
                 Filter.DUE -> list.filter { it.freshness == Freshness.DUE }
-                Filter.NONE -> list.filter { it.records.isEmpty() }
+                Filter.NONE -> list.filter { it.recordCount == 0 }
                 Filter.PINNED -> list.filter { it.event.isPinned }
             }
             // 钉选优先 → 状态最紧急优先 → 名称
             return list.sortedWith(
-                compareByDescending<EventStatus> { it.event.isPinned }
+                compareByDescending<EventStatusLite> { it.event.isPinned }
                     .thenByDescending { it.ratio }
                     .thenBy { it.event.name }
             )
@@ -60,32 +86,53 @@ data class ListUiState(
     }
 }
 
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
 
-    private val keyword = MutableStateFlow("")
-    private val filter = MutableStateFlow(Filter.ALL)
-    private val tagFilter = MutableStateFlow<String?>(null)
+    private val keywordFlow = MutableStateFlow("")
+    private val filterFlow = MutableStateFlow(Filter.ALL)
+    private val tagFlow = MutableStateFlow<String?>(null)
     private val showTemplate = MutableStateFlow(false)
     private val pendingUndo = MutableStateFlow<Pair<Long, Long>?>(null)
 
+    /**
+     * 关键词 → 命中集合。
+     *
+     * 防抖 150ms：连续打字时不打断用户，停手后才查一次库。
+     * 关键词为空直接返回 null，跳过查询。
+     */
+    private val searchHits: StateFlow<Set<Long>?> = keywordFlow
+        .debounce(150)
+        .map { it.trim() }
+        .distinctUntilChanged()
+        .flatMapLatest { kw ->
+            if (kw.isBlank()) flowOf(null)
+            else kotlinx.coroutines.flow.flow { emit(repo.searchMatchedEventIds(kw)) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private val query: StateFlow<QueryState> = combine(
+        keywordFlow, searchHits, filterFlow, tagFlow
+    ) { kw, hits, f, t -> QueryState(kw, hits, f, t) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), QueryState())
+
     val ui: StateFlow<ListUiState> = combine(
-        repo.statuses(), keyword, filter, tagFilter, showTemplate, pendingUndo
-    ) { arr ->
-        val statuses: List<EventStatus> = arr[0] as List<EventStatus>
-        @Suppress("UNCHECKED_CAST")
+        repo.statusesLite(), query, showTemplate, pendingUndo
+    ) { statuses, q, showTpl, undo ->
         ListUiState(
             all = statuses,
-            keyword = arr[1] as String,
-            filter = arr[2] as Filter,
-            tagFilter = arr[3] as String?,
-            showTemplatePicker = arr[4] as Boolean,
-            pendingUndo = arr[5] as Pair<Long, Long>?
+            keyword = q.keyword,
+            searchHits = q.searchHits,
+            filter = q.filter,
+            tagFilter = q.tag,
+            showTemplatePicker = showTpl,
+            pendingUndo = undo
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ListUiState())
 
-    fun onKeyword(v: String) { keyword.value = v }
-    fun onFilter(f: Filter) { filter.value = f }
-    fun onTag(t: String?) { tagFilter.value = t }
+    fun onKeyword(v: String) { keywordFlow.value = v }
+    fun onFilter(f: Filter) { filterFlow.value = f }
+    fun onTag(t: String?) { tagFlow.value = t }
 
     fun quickRecord(eventId: Long, onDone: (String) -> Unit) = viewModelScope.launch {
         repo.quickRecord(eventId)
