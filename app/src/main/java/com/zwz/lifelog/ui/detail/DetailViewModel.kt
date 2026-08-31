@@ -16,8 +16,10 @@ class DetailViewModel(
     private val eventId: Long
 ) : ViewModel() {
 
-    val status: StateFlow<EventStatus?> = repo.statuses()
-        .map { list -> list.firstOrNull { it.event.id == eventId } }
+    // 只查这一个事件及其记录，不牵连其他事件的历史数据。
+    // 早期实现是 repo.statuses().map { firstOrNull { ... } }，
+    // 那会把所有事件的全部记录都加载一遍——详情页只为看一个事件，纯属浪费。
+    val status: StateFlow<EventStatus?> = repo.statusOf(eventId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun togglePin(onDone: () -> Unit) = viewModelScope.launch {
