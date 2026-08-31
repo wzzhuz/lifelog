@@ -8,6 +8,44 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ---------------------------------------------------------------------------
+// 签名配置解析
+//
+// 优先级：环境变量 > keystore.properties > 无（回退 debug 签名）
+//
+// 环境变量方式主要给 CI 用：密钥以 base64 存在 GitHub Secrets 里，
+// 运行时解码成文件再指过来，避免把密钥提交进公开仓库。
+// keystore.properties 已加入 .gitignore，适合本地使用。
+// ---------------------------------------------------------------------------
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        load(FileInputStream(keystorePropsFile))
+    }
+}
+
+fun signingValue(propKey: String, envKey: String): String =
+    System.getenv(envKey)?.takeIf { it.isNotBlank() }
+        ?: keystoreProps.getProperty(propKey)?.takeIf { it.isNotBlank() }
+        ?: ""
+
+val releaseStoreFile = signingValue("storeFile", "LIFELOG_KEYSTORE_FILE")
+val releaseStorePassword = signingValue("storePassword", "LIFELOG_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("keyAlias", "LIFELOG_KEY_ALIAS")
+val releaseKeyPassword = signingValue("keyPassword", "LIFELOG_KEY_PASSWORD")
+
+val useReleaseSigning = releaseStoreFile.isNotBlank()
+    && file(releaseStoreFile).exists()
+    && releaseStorePassword.isNotBlank()
+    && releaseKeyAlias.isNotBlank()
+    && releaseKeyPassword.isNotBlank()
+
+// release 构建是否开启 R8 混淆（默认关闭）
+// 关掉的原因：Glance 小组件依赖反射实例化，R8 容易误删导致运行时崩溃。
+// 想要开启：gradle assembleRelease -PminifyRelease=true
+val minifyRelease: Boolean =
+    (project.findProperty("minifyRelease") as String?)?.toBoolean() ?: false
+
 android {
     namespace = "com.zwz.lifelog"
     compileSdk = 36
@@ -20,28 +58,21 @@ android {
         versionName = "1.0.0"
     }
 
-    // 读取本地签名配置（仅当 keystore.properties 存在时生效）
-    val keystorePropsFile = rootProject.file("keystore.properties")
-    val keystoreProps = Properties()
-    if (keystorePropsFile.exists()) {
-        keystoreProps.load(FileInputStream(keystorePropsFile))
-    }
-
     signingConfigs {
-        // 固定 debug 签名：保证 GitHub Actions 每次编译出的 APK 签名一致，
-        // 否则第二次编译的 APK 会因签名不同而无法覆盖安装（必须先卸载，数据全丢）
+        // 固定 debug 签名：保证每次编译出的 APK 签名一致，
+        // 否则不同批次编译的 APK 会因签名不同而无法覆盖安装（必须先卸载，数据全丢）
         create("commonDebug") {
             storeFile = file("debug.keystore")
             storePassword = "lifelog2026"
             keyAlias = "lifelogdebug"
             keyPassword = "lifelog2026"
         }
-        if (keystorePropsFile.exists()) {
+        if (useReleaseSigning) {
             create("release") {
-                storeFile = file(keystoreProps.getProperty("storeFile") ?: "release.keystore")
-                storePassword = keystoreProps.getProperty("storePassword") ?: ""
-                keyAlias = keystoreProps.getProperty("keyAlias") ?: ""
-                keyPassword = keystoreProps.getProperty("keyPassword") ?: ""
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -53,15 +84,16 @@ android {
             isMinifyEnabled = false
         }
         release {
-            signingConfig = if (keystorePropsFile.exists()) {
+            signingConfig = if (useReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("commonDebug")
             }
-            // 刻意关闭混淆：Glance 小组件依赖反射，R8 容易误删导致运行时崩溃。
-            // 本项目是个人应用，体积不是瓶颈，稳定性优先。
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // 默认不混淆：Glance 小组件依赖反射，R8 容易误删导致运行时崩溃。
+            // 本项目是个人自用，体积不是瓶颈，稳定性优先。
+            // 需要时传 -PminifyRelease=true 开启。
+            isMinifyEnabled = minifyRelease
+            isShrinkResources = minifyRelease
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
