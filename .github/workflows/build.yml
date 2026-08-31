@@ -102,26 +102,42 @@ jobs:
           path: diag/
           if-no-files-found: warn
 
-      # 编译失败时把关键信息发到 Issue，方便远程定位
-      # （CI 日志下载在部分网络环境下受限，Issue 走 api.github.com 更可靠）
-      - name: 失败时上报诊断信息
-        if: steps.step_c.outcome == 'failure' || steps.step_a.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 把编译日志回传到仓库的 ci-diagnostics 分支。
+      # 用途：CI 日志与 Artifact 下载在部分网络环境下不可达，
+      # 而仓库 Contents API 始终可读，便于远程定位问题。
+      # 日志不含任何密钥或个人信息。
+      - name: 回传诊断日志
+        if: always()
         run: |
+          set +e
+          git config user.name  "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git checkout -B ci-diagnostics 2>/dev/null
+          mkdir -p ci-logs
+          OUT="ci-logs/run-${{ github.run_number }}.txt"
+
           {
-            echo '## 编译失败诊断'
-            echo ''
-            echo '- 提交：${{ github.sha }}'
-            echo '- 运行：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-            echo '- 步骤A（Gradle自检）：${{ steps.step_a.outcome }}'
-            echo '- 步骤B（依赖解析）：${{ steps.step_b.outcome }}'
-            echo '- 步骤C（编译APK）：${{ steps.step_c.outcome }}'
-          } > /tmp/body.md
-          gh issue create \
-            --title "CI 编译失败 ${{ github.run_number }} (${{ github.sha }})" \
-            --body-file /tmp/body.md \
-            --label "ci-failure" || echo "Issue 创建失败（不影响主流程）"
+            echo "=== 概要 ==="
+            echo "commit    : ${{ github.sha }}"
+            echo "run       : ${{ github.run_number }} (#${{ github.run_id }})"
+            echo "step_a    : ${{ steps.step_a.outcome }}"
+            echo "step_b    : ${{ steps.step_b.outcome }}"
+            echo "step_c    : ${{ steps.step_c.outcome }}"
+            echo
+            echo "=== A. Gradle 自检日志 ==="
+            tail -n 120 diag/a_java.log 2>/dev/null
+            tail -n 200 diag/a_help.log 2>/dev/null
+            echo
+            echo "=== C. 编译日志（末尾 400 行）==="
+            tail -n 400 diag/c_build.log 2>/dev/null
+          } > "$OUT"
+
+          ls -lh "$OUT"
+          git add ci-logs
+          git commit -q -m "ci: run ${{ github.run_number }} 诊断日志" && \
+            git push -q origin ci-diagnostics --force && echo "✅ 日志已回传" \
+            || echo "⚠️ 日志回传失败"
+        continue-on-error: true
 
       - name: 判定结果
         if: steps.step_c.outcome == 'failure'
