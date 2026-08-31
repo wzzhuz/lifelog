@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -105,9 +106,15 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
         .debounce(150)
         .map { it.trim() }
         .distinctUntilChanged()
-        .flatMapLatest { kw ->
-            if (kw.isBlank()) flowOf(null)
-            else kotlinx.coroutines.flow.flow { emit(repo.searchMatchedEventIds(kw)) }
+        .flatMapLatest< String, Set<Long>? > { kw ->
+            // 必须显式标注 Set<Long>?：
+            // 写 flowOf(null) 会被推断成 Flow<Nothing?>，
+            // 与 else 分支的 Flow<Set<Long>> 合不到一起，编译直接失败。
+            if (kw.isBlank()) {
+                flowOf<Set<Long>?>(null)
+            } else {
+                flow { emit(repo.searchMatchedEventIds(kw)) }
+            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
