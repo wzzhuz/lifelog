@@ -32,10 +32,12 @@ data class TimelineUi(
                         (row.record.note ?: "").contains(kw, ignoreCase = true)
             }
         }
+        // 注意：Pair 只有 first / second，没有 key / value
+        // （key/value 是 Map.Entry 的属性，用错会报 Unresolved reference）
         return src
             .groupBy { row -> TimeFormatter.monthKey(row.record.timestamp) }
             .toList()
-            .sortedByDescending { pair -> pair.value.maxOf { row -> row.record.timestamp } }
+            .sortedByDescending { pair -> pair.second.maxOf { row -> row.record.timestamp } }
             .map { entry ->
                 val month: String = entry.first
                 val list: List<TimelineRow> =
