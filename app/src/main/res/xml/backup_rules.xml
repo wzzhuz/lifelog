@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  自动备份规则（Android 11 及以下使用；Android 12+ 走 data_extraction_rules.xml）。
+
+  注意：一旦写了 <include>，规则就变成「白名单模式」——只有 include 的才备份。
+  此时再写 <exclude> 排除一个没被 include 的路径，Lint 会报 FullBackupContent
+  fatal error 并中断 release 构建（debug 构建不跑 lintVital，所以平时发现不了）。
+
+  backups/ 是本地滚动备份目录，本来就不在 include 里，天然不会被备份，
+  因此不需要也不应该写 exclude。
+-->
 <full-backup-content>
     <include domain="file" path="lifelog.json" />
     <include domain="file" path="photos/" />
-    <exclude domain="file" path="backups/" />
 </full-backup-content>
