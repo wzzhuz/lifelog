@@ -1,0 +1,107 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:      # 允许在网页上手动点一下触发
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 编译 Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 配置 Gradle（带依赖缓存）
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 给 gradlew 加执行权限
+        run: chmod +x ./gradlew
+
+      # 关键：debug.keystore 已提交在仓库里（app/debug.keystore）。
+      # 这样每次 CI 编译出的 APK 都使用同一份签名，新版本可以直接覆盖安装。
+      # 如果缺失，每次全新环境会重新生成随机密钥，导致「签名不一致」装不上。
+      # debug 签名密钥不含任何敏感信息，开源项目中提交它是通行做法。
+      - name: 校验 debug 签名密钥存在
+        run: |
+          test -f app/debug.keystore && echo "✅ debug.keystore 已就绪" \
+            || (echo "❌ 缺少 app/debug.keystore" && exit 1)
+
+      - name: 编译 Debug APK
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: 检查 APK 是否生成
+        run: |
+          ls -lh app/build/outputs/apk/debug/
+          test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: 计算校验值
+        id: hash
+        run: |
+          cd app/build/outputs/apk/debug
+          echo "sha256=$(sha256sum app-debug.apk | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "size=$(du -h app-debug.apk | cut -f1)" >> $GITHUB_OUTPUT
+
+      - name: 上传 APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: 生活手记-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: 输出摘要
+        run: |
+          echo "### 编译完成 ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 文件大小：${{ steps.hash.outputs.size }}" >> $GITHUB_STEP_SUMMARY
+          echo "- SHA256：\`${{ steps.hash.outputs.sha256 }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "在下面的 **Artifacts** 区域点击 \`生活手记-debug-apk\` 即可下载。" >> $GITHUB_STEP_SUMMARY
+
+  release:
+    name: 打 tag 时生成 Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 下载刚编译好的 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: 生活手记-debug-apk
+          path: ./apk
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./apk/app-debug.apk
+          name: 生活手记 ${{ github.ref_name }}
+          body: |
+            自动编译生成的 APK，可直接安装使用。
+
+            **安装提示**
+            - 下载后传到手机，允许「未知来源应用」安装
+            - 签名与之前版本一致，可直接覆盖安装，数据不会丢
+
+            **SHA256**：见 Actions 日志
+          draft: false
+          prerelease: false
