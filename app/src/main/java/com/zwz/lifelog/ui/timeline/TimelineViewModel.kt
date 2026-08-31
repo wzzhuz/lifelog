@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.domain.model.Record
+import com.zwz.lifelog.util.TimeFormatter
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -22,30 +23,45 @@ data class TimelineUi(
 ) {
     /** 按月份分组，月份内按时间倒序。 */
     fun grouped(): List<Pair<String, List<TimelineRow>>> {
-        val kw = keyword.trim()
-        val src = if (kw.isBlank()) rows else rows.filter {
-            it.eventName.contains(kw, ignoreCase = true) ||
-                    (it.record.note ?: "").contains(kw, ignoreCase = true)
+        val kw: String = keyword.trim()
+        val src: List<TimelineRow> = if (kw.isBlank()) {
+            rows
+        } else {
+            rows.filter { row ->
+                row.eventName.contains(kw, ignoreCase = true) ||
+                        (row.record.note ?: "").contains(kw, ignoreCase = true)
+            }
         }
         return src
-            .groupBy { com.zwz.lifelog.util.TimeFormatter.monthKey(it.record.timestamp) }
+            .groupBy { row -> TimeFormatter.monthKey(row.record.timestamp) }
             .toList()
-            .sortedByDescending { pair -> pair.value.maxOf { it.record.timestamp } }
-            .map { (month, list) -> month to list.sortedByDescending { it.record.timestamp } }
+            .sortedByDescending { pair -> pair.value.maxOf { row -> row.record.timestamp } }
+            .map { entry ->
+                val month: String = entry.first
+                val list: List<TimelineRow> =
+                    entry.second.sortedByDescending { row -> row.record.timestamp }
+                month to list
+            }
     }
 }
 
 class TimelineViewModel(private val repo: LifeLogRepository) : ViewModel() {
 
-    val ui: StateFlow<TimelineUi> = repo.snapshotFlow().map { snap ->
-        val nameOf = snap.events.associateBy { it.id }
-        TimelineUi(
-            rows = snap.records
+    val ui: StateFlow<TimelineUi> = repo.snapshotFlow()
+        .map { snap ->
+            val nameOf = snap.events.associateBy { it.id }
+            val rows: List<TimelineRow> = snap.records
                 .sortedByDescending { it.timestamp }
-                .mapNotNull { r ->
-                    val ev = nameOf[r.eventId] ?: return@mapNotNull null
-                    TimelineRow(r, ev.id, ev.name, ev.emoji)
+                .mapNotNull { record ->
+                    val ev = nameOf[record.eventId] ?: return@mapNotNull null
+                    TimelineRow(
+                        record = record,
+                        eventId = ev.id,
+                        eventName = ev.name,
+                        emoji = ev.emoji
+                    )
                 }
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TimelineUi())
+            TimelineUi(rows = rows)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TimelineUi())
 }
