@@ -359,7 +359,6 @@ fun SettingsScreen(
             Spacer(Modifier.height(40.dp))
         }
     }
-}
 
     // 内置模板导入
     if (showTemplatePicker) {
@@ -400,6 +399,7 @@ fun SettingsScreen(
             }
         )
     }
+}
 
 @Composable
 private fun StatCard(value: String, label: String, modifier: Modifier = Modifier) {
