@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <!--
-      静态快捷方式：长按桌面图标弹出。
-      由于具体事件要等用户创建后才知道，这里只放一个「新建记录」入口；
-      用户在应用内把事件「钉选」后，动态快捷方式会由代码在运行时追加。
+      静态快捷方式：长按桌面图标时弹出。
+      注意：shortcutShortLabel / shortcutLongLabel 必须是 string 资源引用，
+      直接写死字符串会导致 Android resource linking failed。
     -->
     <shortcut
         android:shortcutId="new_event"
         android:enabled="true"
         android:icon="@android:drawable/ic_menu_add"
-        android:shortcutShortLabel="新建事件"
-        android:shortcutLongLabel="新建一个生活事件">
+        android:shortcutShortLabel="@string/shortcut_new_event_short"
+        android:shortcutLongLabel="@string/shortcut_new_event_long">
         <intent
             android:action="android.intent.action.VIEW"
             android:targetPackage="com.zwz.lifelog"
