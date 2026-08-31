@@ -22,71 +22,80 @@
 
 ---
 
-### Requirement: 存储格式与位置
+### Requirement: 存储方式
 
-系统 SHALL 将数据以 JSON 存储于 `filesDir/lifelog.json`，结构如下：
+系统 SHALL 使用 Room（SQLite）作为主存储，数据库文件位于应用私有目录。
 
-```json
-{
-  "version": 1,
-  "exportedAt": 1234567890,
-  "app": "com.zwz.lifelog",
-  "events": [ ... ],
-  "records": [ ... ]
-}
-```
+**曾用 JSON 全量文件，因数据量增长到万级后开销线性上升而迁移**——
+原方案每记一笔都要重新序列化整个文件并落盘，
+如今只写变更的那一行，开销与总记录数无关。
 
-照片 SHALL 单独存放于 `filesDir/photos/`，记录中仅引用文件名。
+#### Scenario: 记一笔的开销与数据量无关
 
-#### Scenario: 数据文件位置
+- **GIVEN** 已有 1 万条记录
+- **WHEN** 用户再记一笔
+- **THEN** 只插入一行，耗时与只有 10 条记录时基本相同
+
+#### Scenario: 数据位置
 
 - **WHEN** 应用首次写入数据
-- **THEN** 文件位于应用私有目录，其他应用无法直接访问
+- **THEN** 数据库位于应用私有目录，其他应用无法直接访问
 
 ---
 
-### Requirement: 原子写入
+### Requirement: 表索引
 
-系统 SHALL 采用「先写临时文件 → 校验 → 原子改名」的写入流程：
+系统 SHALL 为高频查询建立索引：
 
-```
-tmpFile.writeText(json)
-if (tmpFile.length() > 0) {
-    file.delete()
-    tmpFile.renameTo(file)      // 同分区内为原子操作
-}
-```
+| 索引 | 服务谁 |
+|---|---|
+| `records(eventId, timestamp)` | 详情页时间线 |
+| `records(timestamp)` | 全局时间线、年度回顾区间查询 |
+| `events(name)` | 模板导入查重 |
+| `events(tag)` | 标签筛选 |
 
-#### Scenario: 写入中途崩溃
+删除事件时 SHALL 由外键 `ON DELETE CASCADE` 级联清理其记录。
 
-- **GIVEN** 正在写入新的数据文件
-- **WHEN** 进程在写到一半时被杀
-- **THEN** 主文件保持为上一次的完整内容
-- **AND** 下次启动读到的是有效数据
+#### Scenario: 删除事件级联清理
 
-**理由**：renameTo 在同一分区是原子操作，
-这是唯一能保证「要么全写完、要么完全没写」的方式。
+- **GIVEN** 事件下有 5 条记录
+- **WHEN** 删除该事件
+- **THEN** 5 条记录由数据库自动删除
+- **AND** 照片文件由应用层单独清理（数据库不知道文件在哪）
 
 ---
 
-### Requirement: 滚动备份与自动恢复
+### Requirement: 首页不加载记录
 
-系统 SHALL 在每次成功写入后维护 `filesDir/backups/` 下最多 4 份滚动备份。
+首页列表 SHALL NOT 加载任何记录行，
+只通过 SQL 聚合（`COUNT` / `MIN` / `MAX`）得出每个事件的
+记录条数、最早时间、最近时间，再据此推导状态。
 
-解析主文件失败时 SHALL 自动从最新备份恢复。
+完整记录列表仅在**详情页、时间线、导出**这些确实需要的场景加载。
 
-#### Scenario: 主文件损坏
+#### Scenario: 首页渲染开销只与事件数有关
 
-- **GIVEN** 主数据文件解析失败
-- **WHEN** 应用启动
-- **THEN** 自动载入最新一份备份
-- **AND** 提示用户发生了恢复
+- **GIVEN** 有 1 万条记录、30 个事件
+- **WHEN** 渲染首页
+- **THEN** 只执行一次 GROUP BY 聚合查询
+- **AND** 开销与 1 万条这个数字无关
 
-#### Scenario: 备份数量上限
+**理由**：原实现给每个事件都装配完整记录列表，
+哪怕界面上只是要显示「共几次」。这是比换数据库本身更大的浪费。
 
-- **GIVEN** `backups/` 已有 4 份备份
-- **WHEN** 发生第 5 次写入
-- **THEN** 最旧的一份被删除，仍保持 4 份
+---
+
+### Requirement: 导出与导入
+
+系统 SHALL 支持导出 JSON / ZIP（含照片）/ CSV，
+格式与 Room 之前的 JSON 版本**保持一致**，便于外部工具处理。
+
+导入 SHALL 自动合并，不覆盖已有数据。
+
+#### Scenario: 导出格式保持兼容
+
+- **WHEN** 用户导出 JSON
+- **THEN** 结构与旧版一致（`version` / `events` / `records`）
 
 ---
 
