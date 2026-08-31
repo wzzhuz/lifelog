@@ -72,7 +72,7 @@ jobs:
       # ---------------------------------------------------------------
       - name: 准备签名密钥
         run: |
-          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+          if [ -n "$RELEASE_KEYSTORE_B64" ]; then
             echo "$RELEASE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/lifelog-release.keystore"
             echo "LIFELOG_KEYSTORE_FILE=$RUNNER_TEMP/lifelog-release.keystore" >> $GITHUB_ENV
             echo "LIFELOG_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
@@ -173,7 +173,7 @@ jobs:
             echo "- 下载下方 APK 传到手机，允许「未知来源应用」后安装"
             echo ""
             echo "**安全提示**"
-            if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            if [ -n "$RELEASE_KEYSTORE_B64" ]; then
               echo "- 使用专用 release 密钥签名，与旧版本签名一致可直接覆盖升级"
             else
               echo "- ⚠️ 本包使用仓库内的 debug 密钥签名（未配置 RELEASE_KEYSTORE_BASE64）"
