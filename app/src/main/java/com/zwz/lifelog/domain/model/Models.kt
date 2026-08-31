@@ -40,10 +40,36 @@ enum class Freshness { NONE, FRESH, SOON, DUE }
 
 /**
  * 事件 + 其派生状态，UI 层直接消费这个对象。
+ *
+ * 注意：包含完整的 records 列表，**仅供详情页使用**。
+ * 首页列表请用 [EventStatusLite]——它不携带记录列表，
+ * 只靠 SQL 聚合统计得出，避免把上万条记录全部加载进内存。
  */
 data class EventStatus(
     val event: Event,
     val records: List<Record>,
+    val lastTimestamp: Long?,
+    val daysSince: Int?,
+    val avgGapMillis: Long?,
+    val baselineDays: Int,
+    val freshness: Freshness,
+    val ratio: Float,
+    val predictedNextMillis: Long?
+)
+
+/**
+ * 首页列表专用的轻量状态。
+ *
+ * 与 [EventStatus] 的区别：**不携带 records 列表**。
+ * 字段由 SQL 聚合查询直接算出（COUNT / MIN / MAX），
+ * 无需把该事件的历史记录读进内存，因此列表渲染开销
+ * 与总记录数无关，只与事件数有关（通常几十个）。
+ *
+ * @param recordCount 该事件的历史记录条数
+ */
+data class EventStatusLite(
+    val event: Event,
+    val recordCount: Int,
     val lastTimestamp: Long?,
     val daysSince: Int?,
     val avgGapMillis: Long?,
