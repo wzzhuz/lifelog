@@ -85,15 +85,15 @@ fun AddRecordScreen(
     var ready by remember { mutableStateOf(false) }
 
     LaunchedEffect(eventId, recordId) {
-        repo.allRaw().let { snap ->
-            eventName = snap.events.firstOrNull { it.id == eventId }?.name ?: ""
-            if (recordId != 0L) {
-                snap.records.firstOrNull { it.id == recordId }?.let {
-                    existing = it
-                    timestamp = it.timestamp
-                    note = it.note ?: ""
-                    photoName = it.photoName
-                }
+        // 定向查询：只取这一个事件名和这一条记录，
+        // 不必把全部数据读进内存再筛选
+        eventName = repo.eventById(eventId)?.name ?: ""
+        if (recordId != 0L) {
+            repo.recordById(recordId)?.let {
+                existing = it
+                timestamp = it.timestamp
+                note = it.note ?: ""
+                photoName = it.photoName
             }
         }
         ready = true
