@@ -10,7 +10,7 @@ import androidx.glance.background
 import androidx.glance.unit.ColorProvider
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.di.ServiceLocator
-import com.zwz.lifelog.domain.model.EventStatus
+import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Freshness
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -22,25 +22,18 @@ import kotlinx.coroutines.withContext
  * 这里刻意只用了最基础的 Column/Row/Text，避免用到不支持的 API 导致运行时崩溃。
  */
 
-internal suspend fun loadTopEvents(context: Context, limit: Int): List<EventStatus> =
+/**
+ * 取「最该做」的几个事件。
+ *
+ * 走 SQL 聚合（COUNT/MIN/MAX），不读取任何记录行——
+ * 小组件每次刷新都会调用，全量加载记录在记录变多后会明显变慢。
+ */
+internal suspend fun loadTopEvents(context: Context, limit: Int): List<EventStatusLite> =
     withContext(Dispatchers.IO) {
         runCatching {
             val repo = ServiceLocator.provideRepository(context)
             repo.load()
-            val snap = repo.allRaw()
-            val byEvent = snap.records.groupBy { it.eventId }
-            snap.events
-                .filter { !it.isArchived }
-                .map { ev ->
-                    com.zwz.lifelog.domain.usecase.StatusCalculator.compute(
-                        ev, (byEvent[ev.id] ?: emptyList()).sortedBy { it.timestamp }
-                    )
-                }
-                .sortedWith(
-                    compareByDescending<EventStatus> { it.event.isPinned }
-                        .thenByDescending { it.ratio }
-                )
-                .take(limit)
+            repo.statusesLiteOnce().take(limit)
         }.getOrDefault(emptyList())
     }
 
@@ -51,7 +44,7 @@ internal fun freshnessColor(f: Freshness): ColorProvider = when (f) {
     Freshness.NONE -> ColorProvider(Color(0xFF9CA3AF))
 }
 
-internal fun daysText(s: EventStatus): String = when {
+internal fun daysText(s: EventStatusLite): String = when {
     s.daysSince == null -> "未记"
     s.daysSince == 0 -> "今天"
     else -> "${s.daysSince} 天"
