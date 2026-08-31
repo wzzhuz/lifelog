@@ -12,6 +12,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+  issues: write           # 编译失败时用于回报日志（自动化诊断用）
+
 jobs:
   build:
     name: 编译 Debug APK
@@ -43,8 +47,75 @@ jobs:
           test -f app/debug.keystore && echo "✅ debug.keystore 已就绪" \
             || (echo "❌ 缺少 app/debug.keystore" && exit 1)
 
-      - name: 编译 Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+      # 分步执行，便于定位失败发生在配置阶段还是编译阶段
+      - name: 步骤 A：Gradle 自检（验证 wrapper 与插件能否解析）
+        id: step_a
+        continue-on-error: true
+        run: |
+          echo "=== java ==="; java -version 2>&1
+          echo "=== gradle 版本 ==="; ./gradlew --version 2>&1 | tail -20
+          echo "=== 配置阶段自检 ==="
+          ./gradlew help --stacktrace --no-daemon 2>&1 | tail -60
+
+      - name: 步骤 B：解析依赖
+        id: step_b
+        continue-on-error: true
+        run: |
+          ./gradlew :app:dependencies --configuration debugRuntimeClasspath \
+            --stacktrace --no-daemon 2>&1 | tail -80
+
+      - name: 步骤 C：编译 Debug APK
+        id: step_c
+        continue-on-error: true
+        run: |
+          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tail -200
+
+      # 把日志打包，失败时能下载查看
+      - name: 汇总诊断信息
+        if: always()
+        run: |
+          mkdir -p diag
+          echo "step_a=${{ steps.step_a.outcome }}" > diag/result.txt
+          echo "step_b=${{ steps.step_b.outcome }}" >> diag/result.txt
+          echo "step_c=${{ steps.step_c.outcome }}" >> diag/result.txt
+          echo "commit=${{ github.sha }}" >> diag/result.txt
+          echo "runner=$(uname -a)" >> diag/result.txt
+          echo "java_home=$JAVA_HOME" >> diag/result.txt
+
+      - name: 上传诊断信息
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 诊断信息
+          path: diag/result.txt
+          if-no-files-found: warn
+
+      # 编译失败时把关键信息发到 Issue，方便远程定位
+      # （CI 日志下载在部分网络环境下受限，Issue 走 api.github.com 更可靠）
+      - name: 失败时上报诊断信息
+        if: steps.step_c.outcome == 'failure' || steps.step_a.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo '## 编译失败诊断'
+            echo ''
+            echo '- 提交：${{ github.sha }}'
+            echo '- 运行：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            echo '- 步骤A（Gradle自检）：${{ steps.step_a.outcome }}'
+            echo '- 步骤B（依赖解析）：${{ steps.step_b.outcome }}'
+            echo '- 步骤C（编译APK）：${{ steps.step_c.outcome }}'
+          } > /tmp/body.md
+          gh issue create \
+            --title "CI 编译失败 ${{ github.run_number }} (${{ github.sha }})" \
+            --body-file /tmp/body.md \
+            --label "ci-failure" || echo "Issue 创建失败（不影响主流程）"
+
+      - name: 判定结果
+        if: steps.step_c.outcome == 'failure'
+        run: |
+          echo "❌ 编译失败，详见上方 步骤 A/B/C 的输出"
+          exit 1
 
       - name: 检查 APK 是否生成
         run: |
