@@ -119,6 +119,38 @@ class LifeLogRepository(private val context: Context) {
      *
      * 只加载这一个事件的记录，不会牵连其他事件。
      */
+    /**
+     * 详情页分页状态。
+     *
+     * 与 [statusOf] 的区别：记录只取最近 [limit] 条，
+     * 而统计信息（次数 / 平均间隔 / 预测）走 SQL 聚合，仍基于全量数据。
+     *
+     * **为什么统计不能用分页结果算**：
+     * 分页后内存里只有 20 条，拿它算「累计次数」会得到 20 而不是真实总数，
+     * 「平均间隔」也会因为只覆盖最近一段而失真。
+     */
+    fun statusOfPaged(eventId: Long, limit: Int): Flow<EventStatus?> =
+        combine(
+            dao.observeEvent(eventId),
+            dao.observeStatsOf(eventId),
+            dao.observeRecordsPage(eventId, limit)
+        ) { ev, stats, recs ->
+            if (ev == null) null
+            else StatusCalculator.computePaged(
+                event = ev.toDomain(),
+                recordsDesc = recs.map { it.toDomain() },
+                count = stats?.count ?: 0,
+                firstAsc = stats?.firstTs,
+                lastAsc = stats?.lastTs
+            )
+        }
+
+    /** 载入更早的一批记录。返回本次新载入的条数。 */
+    suspend fun loadMoreRecords(eventId: Long, limit: Int, offset: Int): List<Record> =
+        withContext(Dispatchers.IO) {
+            dao.recordsPage(eventId, limit, offset).map { it.toDomain() }
+        }
+
     fun statusOf(eventId: Long): Flow<EventStatus?> =
         combine(
             dao.observeEvent(eventId),
