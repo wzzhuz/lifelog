@@ -99,6 +99,19 @@ interface LifeLogDao {
     @Query("UPDATE events SET isArchived = :archived WHERE id = :id")
     suspend fun setArchived(id: Long, archived: Boolean)
 
+    /**
+     * 批量更新手动排序。
+     *
+     * 拖拽结束后一次性写回，避免每移动一格就写一次库。
+     * 参数是有序的事件 id 列表，下标即新的 sortOrder。
+     */
+    @androidx.room.Transaction
+    @Query("UPDATE events SET sortOrder = :order WHERE id = :id")
+    suspend fun updateSortOrder(id: Long, order: Int)
+
+    @Query("SELECT * FROM events WHERE isArchived = 0 ORDER BY sortOrder ASC, name ASC")
+    suspend fun activeEventsSorted(): List<EventEntity>
+
     // ---------- 记录 ----------
 
     @Query("SELECT * FROM records WHERE eventId = :eventId ORDER BY timestamp DESC")
