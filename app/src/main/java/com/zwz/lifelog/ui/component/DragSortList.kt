@@ -2,15 +2,17 @@ package com.zwz.lifelog.ui.component
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.animateItemPlacement
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
@@ -23,10 +25,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.consume
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -36,28 +41,27 @@ import kotlinx.coroutines.launch
  *
  * 两处关键实现，都是踩过坑后定的：
  *
- * **1. 自定义长按检测，而非 [detectDragGesturesAfterLongPress]**
+ * **1. 自定义长按检测，不用官方 `detectDragGesturesAfterLongPress`**
  * 卡片内部有 `clickable`，它在 Main pass 会消费按下事件。
- * 而 `detectDragGesturesAfterLongPress` 用 `requireUnconsumed = true`，
- * 外层的拖拽检测因此可能永远收不到按下 → 拖拽看起来能动，
- * 但 `onDragEnd` 不触发 → **顺序保存不下来**。
- * 这里自己实现，用 Main pass + 不检查消费状态，保证一定能收到。
+ * 而官方实现用 `requireUnconsumed = true`，外层拖拽检测
+ * 因此可能永远收不到按下 → 拖拽看起来能动，但 `onDragEnd` 不触发
+ * → **顺序保存不下来**。这里自己实现，用 `requireUnconsumed = false`。
  *
- * **2. `animateItemPlacement`**
- * 让重新排序时其他卡片平滑让位，而不是瞬间跳到新位置。
+ * **2. 弹簧动画**
+ * 位移用 [Animatable] 归位，缩放与透明度用 [animateFloatAsState]，
+ * 松手后平滑回落而不是瞬间跳变。
  */
 @Composable
 fun <T> DragSortLazyColumn(
     items: List<T>,
     keyOf: (T) -> Any,
-    /** 返回 false 表示不允许移动到该位置（如分组头）。 */
+    /** 返回 false 表示不允许移动到该位置（如跨越分组头）。 */
     canMove: (fromIndex: Int, toIndex: Int) -> Boolean = { _, _ -> true },
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onDragEnd: () -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
-    verticalArrangement: androidx.compose.foundation.layout.Arrangement.Vertical =
-        androidx.compose.foundation.layout.Arrangement.Top,
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
     itemContent: @Composable (item: T, index: Int, isDragging: Boolean) -> Unit
 ) {
     val listState = rememberLazyListState()
@@ -73,37 +77,42 @@ fun <T> DragSortLazyColumn(
         itemsIndexed(items, key = { _, item -> keyOf(item) }) { index, item ->
             val isDragging = index == draggingIndex
 
-            // 位移用弹簧动画，松手后平滑归位而不是瞬间跳回
             val animatedOffset = remember { Animatable(0f) }
             LaunchedEffect(isDragging, rawOffset) {
                 animatedOffset.animateTo(
-                    if (isDragging) rawOffset else 0f,
-                    spring(
+                    targetValue = if (isDragging) rawOffset else 0f,
+                    animationSpec = spring(
                         dampingRatio = Spring.DampingRatioNoBouncy,
                         stiffness = Spring.StiffnessMedium
                     )
                 )
             }
 
-            val scale by androidx.compose.animation.core.animateFloatAsState(
-                targetValue = if (isDragging) 1.04f else 1f,
+            val scale by animateFloatAsState(
+                targetValue = if (isDragging) 1.03f else 1f,
                 animationSpec = spring(stiffness = Spring.StiffnessMedium),
                 label = "dragScale"
             )
-            val alpha by androidx.compose.animation.core.animateFloatAsState(
-                targetValue = if (isDragging) 0.9f else 1f,
+            val alpha by animateFloatAsState(
+                targetValue = if (isDragging) 0.92f else 1f,
+                animationSpec = spring(stiffness = Spring.StiffnessMedium),
                 label = "dragAlpha"
+            )
+            val elevation by animateFloatAsState(
+                targetValue = if (isDragging) 8f else 0f,
+                animationSpec = spring(stiffness = Spring.StiffnessMedium),
+                label = "dragElevation"
             )
 
             Box(
                 modifier = Modifier
                     .zIndex(if (isDragging) 1f else 0f)
-                    .animateItemPlacement(spring(stiffness = Spring.StiffnessMediumLow))
                     .graphicsLayer {
                         translationY = animatedOffset.value
                         scaleX = scale
                         scaleY = scale
                         this.alpha = alpha
+                        shadowElevation = elevation
                     }
                     .pointerInput(index) {
                         detectLongPressDrag(
@@ -119,7 +128,7 @@ fun <T> DragSortLazyColumn(
                             onDragCancel = {
                                 draggingIndex = -1
                                 rawOffset = 0f
-                                // 取消也要保存：此时列表可能已经被拖过
+                                // 取消也要保存：此时列表可能已被拖动过
                                 onDragEnd()
                             },
                             onDrag = { deltaY ->
@@ -151,11 +160,11 @@ fun <T> DragSortLazyColumn(
 }
 
 /**
- * 自己实现长按拖拽。
+ * 自己实现的长按拖拽检测。
  *
- * 与官方 `detectDragGesturesAfterLongPress` 的区别：
- * 用 `awaitFirstDown(requireUnconsumed = false)`，
- * 因此即使内部有 `clickable` 消费了按下事件也能正常工作。
+ * 与官方 `detectDragGesturesAfterLongPress` 的唯一实质区别：
+ * [awaitFirstDown] 传 `requireUnconsumed = false`，
+ * 因此即使内部有 `clickable` 消费了按下事件也能收到。
  */
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectLongPressDrag(
     onDragStart: () -> Unit,
@@ -164,19 +173,16 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectLo
     onDrag: (deltaY: Float) -> Unit
 ) {
     coroutineScope {
-        androidx.compose.ui.input.pointer.awaitEachGesture {
-            val down = androidx.compose.ui.input.pointer.AwaitPointerEventScope::class
-                .let { awaitFirstDown(requireUnconsumed = false) }
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
 
             var dragging = false
-            val longPressJob = launch {
+            var reported = false
+            val longPressJob: Job = launch {
                 delay(250)
                 dragging = true
                 onDragStart()
             }
-            // 延迟 250ms 后由 longPressJob 置位；这里用局部标记跟踪，
-            // 避免 finally 里重复回调（onDragEnd 已保存过就不用再保存）
-            var reported = false
 
             try {
                 while (true) {
@@ -204,7 +210,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectLo
                 }
             } finally {
                 longPressJob.cancel()
-                // 循环异常退出（如组合被取消）时兜底保存
+                // 循环异常退出时兜底保存，避免已拖动的位置丢失
                 if (dragging && !reported) {
                     runCatching { onDragCancel() }
                 }
