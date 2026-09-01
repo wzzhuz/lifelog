@@ -138,12 +138,9 @@ fun UsageGuideScreen(onBack: () -> Unit) {
             // ---------- 5. 模板 ----------
             GuideSection(title = "事件从哪来") {
                 Text(
-                    "新建事件有两个途径：
-" +
-                        "• 首页右下角 + 号，从零创建
-" +
-                        "• 设置页「模板」分组，从 34 个预置模板里挑
-",
+                    "新建事件有两个途径：\n" +
+                        "• 首页右下角 + 号，从零创建\n" +
+                        "• 设置页「模板」分组，从 34 个预置模板里挑",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(8.dp))
