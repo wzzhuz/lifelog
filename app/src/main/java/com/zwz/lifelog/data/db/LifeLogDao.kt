@@ -48,6 +48,39 @@ interface LifeLogDao {
     @Query("SELECT * FROM events ORDER BY id ASC")
     suspend fun allEvents(): List<EventEntity>
 
+    /**
+     * 归档事件及其记录条数。
+     *
+     * 用 LEFT JOIN 而非 INNER JOIN：一个记录都没有的事件
+     * 也可能是归档状态，不能把它漏掉。
+     */
+    @Query(
+        """
+        SELECT e.*, COUNT(r.id) AS recordCount
+        FROM events e
+        LEFT JOIN records r ON r.eventId = e.id
+        WHERE e.isArchived = 1
+        GROUP BY e.id
+        ORDER BY e.name ASC
+        """
+    )
+    fun observeArchivedWithCount(): kotlinx.coroutines.flow.Flow<List<ArchivedEventRow>>
+
+    /** 归档事件总数，设置页显示入口时用。 */
+    @Query("SELECT COUNT(*) FROM events WHERE isArchived = 1")
+    fun observeArchivedCount(): kotlinx.coroutines.flow.Flow<Int>
+
+    /** 分页：某事件的记录，按时间倒序取一批。 */
+    @Query(
+        """
+        SELECT * FROM records
+        WHERE eventId = :eventId
+        ORDER BY timestamp DESC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    suspend fun recordsPage(eventId: Long, limit: Int, offset: Int): List<RecordEntity>
+
     @Query("SELECT COUNT(*) FROM events")
     fun observeEventCount(): Flow<Int>
 
