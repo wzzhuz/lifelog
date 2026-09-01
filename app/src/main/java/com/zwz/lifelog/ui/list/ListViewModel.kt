@@ -44,12 +44,17 @@ data class ListUiState(
     val searchHits: Set<Long>? = null,
     val filter: Filter = Filter.ALL,
     val tagFilter: String? = null,
+    /**
+     * 全部事件的标签（不受当前筛选影响）。
+     *
+     * 曾经从「当前可见事件」推导，导致选中某个分类后
+     * 分类行只剩那一个可点，用户无法切换到别的分类。
+     */
+    val allTags: List<String> = emptyList(),
     val showTemplatePicker: Boolean = false,
     val pendingUndo: Pair<Long, Long>? = null   // (recordId, eventId)
 ) {
     val visible: List<EventStatusLite> get() = filtered(all, keyword, searchHits, filter, tagFilter)
-
-    val allTags: List<String> get() = all.mapNotNull { it.event.tag }.distinct().sorted()
 
     companion object {
         fun filtered(
@@ -77,9 +82,14 @@ data class ListUiState(
                 Filter.NONE -> list.filter { it.recordCount == 0 }
                 Filter.PINNED -> list.filter { it.event.isPinned }
             }
-            // 钉选优先 → 状态最紧急优先 → 名称
+            // 钉选（置顶层） → 手动顺序 → 状态最紧急 → 名称
+            //
+            // sortOrder 字段数据库里一直存在、DAO 也按它排，
+            // 但此前**没有任何界面能修改它**，排序实际是「钉选→紧急度→名称」，
+            // 等于这个字段白留。现在拖拽会写入它，排序逻辑也随之启用。
             return list.sortedWith(
                 compareByDescending<EventStatusLite> { it.event.isPinned }
+                    .thenBy { it.event.sortOrder }
                     .thenByDescending { it.ratio }
                     .thenBy { it.event.name }
             )
@@ -132,6 +142,7 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
             searchHits = q.searchHits,
             filter = q.filter,
             tagFilter = q.tag,
+            allTags = statuses.mapNotNull { it.event.tag }.distinct().sorted(),
             showTemplatePicker = showTpl,
             pendingUndo = undo
         )
@@ -145,6 +156,15 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
         repo.quickRecord(eventId)
         val name = repo.eventById(eventId)?.name ?: ""
         onDone(name)
+    }
+
+    /**
+     * 保存拖拽后的顺序。
+     *
+     * @param orderedIds 当前可见列表拖拽后的**完整**顺序
+     */
+    fun saveOrder(orderedIds: List<Long>) = viewModelScope.launch {
+        repo.saveSortOrder(orderedIds)
     }
 
     fun showTemplatePicker() { showTemplate.value = true }

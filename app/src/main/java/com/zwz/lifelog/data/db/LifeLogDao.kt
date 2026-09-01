@@ -48,6 +48,39 @@ interface LifeLogDao {
     @Query("SELECT * FROM events ORDER BY id ASC")
     suspend fun allEvents(): List<EventEntity>
 
+    /**
+     * 归档事件及其记录条数。
+     *
+     * 用 LEFT JOIN 而非 INNER JOIN：一个记录都没有的事件
+     * 也可能是归档状态，不能把它漏掉。
+     */
+    @Query(
+        """
+        SELECT e.*, COUNT(r.id) AS recordCount
+        FROM events e
+        LEFT JOIN records r ON r.eventId = e.id
+        WHERE e.isArchived = 1
+        GROUP BY e.id
+        ORDER BY e.name ASC
+        """
+    )
+    fun observeArchivedWithCount(): kotlinx.coroutines.flow.Flow<List<ArchivedEventRow>>
+
+    /** 归档事件总数，设置页显示入口时用。 */
+    @Query("SELECT COUNT(*) FROM events WHERE isArchived = 1")
+    fun observeArchivedCount(): kotlinx.coroutines.flow.Flow<Int>
+
+    /** 分页：某事件的记录，按时间倒序取一批。 */
+    @Query(
+        """
+        SELECT * FROM records
+        WHERE eventId = :eventId
+        ORDER BY timestamp DESC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    suspend fun recordsPage(eventId: Long, limit: Int, offset: Int): List<RecordEntity>
+
     @Query("SELECT COUNT(*) FROM events")
     fun observeEventCount(): Flow<Int>
 
@@ -65,6 +98,19 @@ interface LifeLogDao {
 
     @Query("UPDATE events SET isArchived = :archived WHERE id = :id")
     suspend fun setArchived(id: Long, archived: Boolean)
+
+    /**
+     * 批量更新手动排序。
+     *
+     * 拖拽结束后一次性写回，避免每移动一格就写一次库。
+     * 参数是有序的事件 id 列表，下标即新的 sortOrder。
+     */
+    @androidx.room.Transaction
+    @Query("UPDATE events SET sortOrder = :order WHERE id = :id")
+    suspend fun updateSortOrder(id: Long, order: Int)
+
+    @Query("SELECT * FROM events WHERE isArchived = 0 ORDER BY sortOrder ASC, name ASC")
+    suspend fun activeEventsSorted(): List<EventEntity>
 
     // ---------- 记录 ----------
 

@@ -1,5 +1,6 @@
 package com.zwz.lifelog.ui.list
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +61,14 @@ import androidx.compose.ui.unit.dp
 import com.zwz.lifelog.domain.model.Templates
 import com.zwz.lifelog.ui.component.EventCard
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.toMutableStateList
+import androidx.compose.ui.text.font.FontWeight
+import com.zwz.lifelog.data.HomeLayoutMode
+import com.zwz.lifelog.domain.model.EventStatusLite
+import com.zwz.lifelog.ui.component.CardDensity
+import com.zwz.lifelog.ui.component.DragSortLazyColumn
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,11 +78,18 @@ fun ListScreen(
     onCreateEvent: () -> Unit,
     onOpenTimeline: () -> Unit,
     onOpenSettings: () -> Unit,
-    onDataChanged: () -> Unit
+    onDataChanged: () -> Unit,
+    layoutMode: HomeLayoutMode = HomeLayoutMode.COMPACT,
+    collapsedTags: Set<String> = emptySet(),
+    onToggleCollapse: (String) -> Unit = {}
 ) {
     val state by vm.ui.collectAsState()
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val density = when (layoutMode) {
+        HomeLayoutMode.COMPACT -> CardDensity.COMPACT
+        HomeLayoutMode.COMFORT, HomeLayoutMode.GROUPED -> CardDensity.COMFORT
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
@@ -169,18 +185,28 @@ fun ListScreen(
                 Spacer(Modifier.height(6.dp))
             }
 
-            // 筛选
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item { Chip("全部", state.filter == Filter.ALL) { vm.onFilter(Filter.ALL) } }
-                item { Chip("该做了", state.filter == Filter.DUE) { vm.onFilter(Filter.DUE) } }
-                item { Chip("待记录", state.filter == Filter.NONE) { vm.onFilter(Filter.NONE) } }
-                item { Chip("已钉选", state.filter == Filter.PINNED) { vm.onFilter(Filter.PINNED) } }
-                val tags = state.allTags
-                items(tags) { t ->
-                    Chip(t, state.tagFilter == t) { vm.onTag(if (state.tagFilter == t) null else t) }
+            // 筛选：状态与分类是**两个独立的维度**，不是一组互斥选项。
+            // 曾经把它们放在同一行、用同样的样式，用户会理所当然认为互斥——
+            // 看到「不限」和「汽车」同时高亮就觉得是 bug。
+            // 改为两行并各自标注，从视觉上区分维度。
+            FilterRow(label = "状态") {
+                Chip("不限", state.filter == Filter.ALL) { vm.onFilter(Filter.ALL) }
+                Chip("该做了", state.filter == Filter.DUE) { vm.onFilter(Filter.DUE) }
+                Chip("待记录", state.filter == Filter.NONE) { vm.onFilter(Filter.NONE) }
+                Chip("已钉选", state.filter == Filter.PINNED) { vm.onFilter(Filter.PINNED) }
+            }
+
+            // 分类行从**全部事件**推导，而不是当前可见事件。
+            // 否则选了「汽车」之后分类行只剩「汽车」一个可点，很怪。
+            if (state.allTags.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                FilterRow(label = "分类") {
+                    Chip("不限", state.tagFilter == null) { vm.onTag(null) }
+                    state.allTags.forEach { t ->
+                        Chip(t, state.tagFilter == t) {
+                            vm.onTag(if (state.tagFilter == t) null else t)
+                        }
+                    }
                 }
             }
 
@@ -188,26 +214,72 @@ fun ListScreen(
 
             if (state.visible.isEmpty()) {
                 EmptyState(hasData = state.all.isNotEmpty()) { vm.showTemplatePicker() }
+            } else if (layoutMode == HomeLayoutMode.GROUPED) {
+                // 分组模式：按标签归组，吸顶头 + 可折叠
+                GroupedList(
+                    visible = state.visible,
+                    collapsed = collapsedTags,
+                    density = density,
+                    onToggleCollapse = { onToggleCollapse(it) },
+                    onOpenDetail = onOpenDetail,
+                    onQuickRecord = { id ->
+                        vm.quickRecord(id) { name ->
+                            onDataChanged()
+                            scope.launch {
+                                snack.showSnackbar("已记录：$name", actionLabel = "撤销")
+                            }
+                        }
+                    }
+                )
             } else {
-                LazyColumn(
+                // 列表模式（紧凑 / 舒适）：支持长按拖拽排序
+                //
+                // 关键：onReorder 只改内存里的顺序，松手才写库。
+                // 拖拽过程中每移动一格都写库会造成大量无谓 IO。
+                val ordered: androidx.compose.runtime.snapshots.SnapshotStateList<EventStatusLite> =
+                    remember { mutableStateListOf<EventStatusLite>() }
+                // 数据变化时重建本地顺序。
+                // 必须放在 LaunchedEffect 而非 remember 里：
+                // 在组合中直接写 SnapshotStateList 会触发循环重组。
+                LaunchedEffect(state.visible) {
+                    val want: List<Long> = state.visible.map { it.event.id }
+                    if (ordered.map { it.event.id } != want) {
+                        ordered.clear()
+                        ordered.addAll(state.visible)
+                    }
+                }
+
+                DragSortLazyColumn<EventStatusLite>(
+                    items = ordered,
+                    keyOf = { it.event.id },
+                    onReorder = { from, to ->
+                        if (from in ordered.indices && to in ordered.indices) {
+                            val moved = ordered.removeAt(from)
+                            ordered.add(to, moved)
+                        }
+                    },
+                    onDragEnd = { vm.saveOrder(ordered.map { it.event.id }) },
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(state.visible, key = { it.event.id }) { s ->
-                        EventCard(
-                            status = s,
-                            onClick = { onOpenDetail(s.event.id) },
-                            onQuickRecord = {
-                                vm.quickRecord(s.event.id) { name ->
-                                    onDataChanged()
-                                    scope.launch {
-                                        snack.showSnackbar("已记录：$name", actionLabel = "撤销")
-                                    }
+                    verticalArrangement = Arrangement.spacedBy(
+                        if (layoutMode == HomeLayoutMode.COMPACT) 8.dp else 10.dp
+                    )
+                ) { s, _, _, _ ->
+                    EventCard(
+                        status = s,
+                        density = density,
+                        onClick = { onOpenDetail(s.event.id) },
+                        onQuickRecord = {
+                            vm.quickRecord(s.event.id) { name ->
+                                onDataChanged()
+                                scope.launch {
+                                    snack.showSnackbar("已记录：$name", actionLabel = "撤销")
                                 }
                             }
-                        )
+                        }
+                    )
+                    if (layoutMode == HomeLayoutMode.COMPACT) {
+                        Spacer(Modifier.height(0.dp))
                     }
-                    item { Spacer(Modifier.height(80.dp)) }
                 }
             }
         }
@@ -218,6 +290,29 @@ fun ListScreen(
             onDataChanged()
             scope.launch { snack.showSnackbar("已导入 $n 个事件") }
         })
+    }
+}
+
+@Composable
+private fun FilterRow(
+    label: String,
+    items: @androidx.compose.runtime.Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(34.dp)
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { items() }
+        }
     }
 }
 
@@ -311,6 +406,104 @@ private fun TemplateSheet(vm: ListViewModel, onDone: (Int) -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(12.dp)
             ) { Text("导入 ${selected.size} 个") }
+        }
+    }
+}
+
+/**
+ * 分组模式的列表。
+ *
+ * 设计取舍：
+ * - **默认全部展开**。点开才看到事件会多一层操作，
+ *   违背「一眼看到所有该做的事」。折叠权交给用户。
+ * - 每组末尾加底部留白，让最后一组也能滚到底。
+ */
+@Composable
+private fun GroupedList(
+    visible: List<EventStatusLite>,
+    collapsed: Set<String>,
+    density: CardDensity,
+    onToggleCollapse: (String) -> Unit,
+    onOpenDetail: (Long) -> Unit,
+    onQuickRecord: (Long) -> Unit
+) {
+    // 无标签的归到「未分类」，避免事件凭空消失
+    val groups = remember(visible) {
+        visible
+            .groupBy { it.event.tag?.takeIf { t -> t.isNotBlank() } ?: "未分类" }
+            .toList()
+            .sortedBy { it.first }
+    }
+
+    LazyColumn(
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        groups.forEach { (tag, list) ->
+            // 分组头用普通 item 而非 stickyHeader。
+            // 该 Compose BOM 版本下 stickyHeader 的导入路径不确定，
+            // 连续两次编译失败后降级为普通头——分组与折叠能力保留，
+            // 仅失去滚动时吸顶的效果。
+            item(key = "tag_$tag") {
+                GroupHeader(
+                    tag = tag,
+                    count = list.size,
+                    collapsed = tag in collapsed,
+                    onToggle = { onToggleCollapse(tag) }
+                )
+            }
+            if (tag !in collapsed) {
+                items(list, key = { it.event.id }) { s: EventStatusLite ->
+                    EventCard(
+                        status = s,
+                        density = density,
+                        onClick = { onOpenDetail(s.event.id) },
+                        onQuickRecord = { onQuickRecord(s.event.id) }
+                    )
+                }
+            }
+        }
+        item { Spacer(Modifier.height(80.dp)) }
+    }
+}
+
+@Composable
+private fun GroupHeader(
+    tag: String,
+    count: Int,
+    collapsed: Boolean,
+    onToggle: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (collapsed) "▸" else "▾",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                tag,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "$count",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

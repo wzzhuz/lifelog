@@ -4,6 +4,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,6 +46,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.zwz.lifelog.data.HomeLayoutMode
+import com.zwz.lifelog.data.HomeLayoutPrefs
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.font.FontWeight
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.data.TemplateFileParser
 import com.zwz.lifelog.data.TemplateParseResult
@@ -68,6 +73,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenYearReview: () -> Unit,
     onOpenUsageGuide: () -> Unit,
+    onOpenArchived: () -> Unit,
     onDataChanged: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -79,6 +85,7 @@ fun SettingsScreen(
     // 记录上万时，进设置页会明显卡一下。
     val eventCount by repo.eventCountFlow().collectAsState(initial = 0)
     val recordCount by repo.recordCountFlow().collectAsState(initial = 0)
+    val archivedCount by repo.archivedCountFlow().collectAsState(initial = 0)
 
     // 模板导入相关
     var showTemplatePicker by remember { mutableStateOf(false) }
@@ -249,6 +256,34 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(22.dp))
+            SectionTitle("整理")
+            OutlinedButton(
+                onClick = onOpenArchived,
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("已归档事件")
+                    Text(
+                        "$archivedCount 个",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "归档后不显示在首页，可随时恢复。",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(24.dp))
             SectionTitle("模板")
             OutlinedButton(
                 onClick = {
@@ -332,6 +367,38 @@ fun SettingsScreen(
                 }
             }
 
+            Spacer(Modifier.height(20.dp))
+            SectionTitle("首页布局")
+            val layoutMode by HomeLayoutPrefs.modeFlow(context)
+                .collectAsState(initial = HomeLayoutMode.COMPACT)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LayoutOption(
+                    selected = layoutMode == HomeLayoutMode.COMPACT,
+                    title = "紧凑",
+                    desc = "一屏约 8~9 个，信息精简",
+                    onClick = { scope.launch { HomeLayoutPrefs.setMode(context, HomeLayoutMode.COMPACT) } }
+                )
+                LayoutOption(
+                    selected = layoutMode == HomeLayoutMode.COMFORT,
+                    title = "舒适",
+                    desc = "一屏约 5~6 个，信息最完整",
+                    onClick = { scope.launch { HomeLayoutPrefs.setMode(context, HomeLayoutMode.COMFORT) } }
+                )
+                LayoutOption(
+                    selected = layoutMode == HomeLayoutMode.GROUPED,
+                    title = "按分类分组",
+                    desc = "吸顶分类头，可折叠",
+                    onClick = { scope.launch { HomeLayoutPrefs.setMode(context, HomeLayoutMode.GROUPED) } }
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "紧凑与舒适模式下，长按卡片可拖动排序。",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             Spacer(Modifier.height(24.dp))
             SectionTitle("回顾")
             OutlinedButton(
@@ -398,6 +465,46 @@ fun SettingsScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun LayoutOption(
+    selected: Boolean,
+    title: String,
+    desc: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        else MaterialTheme.colorScheme.surface,
+        border = if (selected) null else androidx.compose.foundation.BorderStroke(
+            1.dp, MaterialTheme.colorScheme.outlineVariant
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            androidx.compose.material3.RadioButton(
+                selected = selected,
+                onClick = onClick
+            )
+            Spacer(Modifier.width(6.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium)
+                Text(desc, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
