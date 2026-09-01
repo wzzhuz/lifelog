@@ -60,6 +60,14 @@ import androidx.compose.ui.unit.dp
 import com.zwz.lifelog.domain.model.Templates
 import com.zwz.lifelog.ui.component.EventCard
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.lazy.stickyHeader
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.text.font.FontWeight
+import com.zwz.lifelog.data.HomeLayoutMode
+import com.zwz.lifelog.domain.model.EventStatusLite
+import com.zwz.lifelog.ui.component.CardDensity
+import com.zwz.lifelog.ui.component.DragSortLazyColumn
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,11 +77,18 @@ fun ListScreen(
     onCreateEvent: () -> Unit,
     onOpenTimeline: () -> Unit,
     onOpenSettings: () -> Unit,
-    onDataChanged: () -> Unit
+    onDataChanged: () -> Unit,
+    layoutMode: HomeLayoutMode = HomeLayoutMode.COMPACT,
+    collapsedTags: Set<String> = emptySet(),
+    onToggleCollapse: (String) -> Unit = {}
 ) {
     val state by vm.ui.collectAsState()
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val density = when (layoutMode) {
+        HomeLayoutMode.COMPACT -> CardDensity.COMPACT
+        HomeLayoutMode.COMFORT, HomeLayoutMode.GROUPED -> CardDensity.COMFORT
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
@@ -198,26 +213,69 @@ fun ListScreen(
 
             if (state.visible.isEmpty()) {
                 EmptyState(hasData = state.all.isNotEmpty()) { vm.showTemplatePicker() }
+            } else if (layoutMode == HomeLayoutMode.GROUPED) {
+                // 分组模式：按标签归组，吸顶头 + 可折叠
+                GroupedList(
+                    visible = state.visible,
+                    collapsed = collapsedTags,
+                    density = density,
+                    onToggleCollapse = { onToggleCollapse(it) },
+                    onOpenDetail = onOpenDetail,
+                    onQuickRecord = { id ->
+                        vm.quickRecord(id) { name ->
+                            onDataChanged()
+                            scope.launch {
+                                snack.showSnackbar("已记录：$name", actionLabel = "撤销")
+                            }
+                        }
+                    }
+                )
             } else {
-                LazyColumn(
+                // 列表模式（紧凑 / 舒适）：支持长按拖拽排序
+                //
+                // 关键：onReorder 只改内存里的顺序，松手才写库。
+                // 拖拽过程中每移动一格都写库会造成大量无谓 IO。
+                val ordered = remember(state.visible) {
+                    state.visible.toMutableStateList()
+                }
+                LaunchedEffect(state.visible) {
+                    if (ordered.map { it.event.id } != state.visible.map { it.event.id }) {
+                        ordered.clear()
+                        ordered.addAll(state.visible)
+                    }
+                }
+
+                DragSortLazyColumn(
+                    items = ordered,
+                    keyOf = { it.event.id },
+                    onReorder = { from, to ->
+                        if (from in ordered.indices && to in ordered.indices) {
+                            val moved = ordered.removeAt(from)
+                            ordered.add(to, moved)
+                        }
+                    },
+                    onDragEnd = { vm.saveOrder(ordered.map { it.event.id }) },
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(state.visible, key = { it.event.id }) { s ->
-                        EventCard(
-                            status = s,
-                            onClick = { onOpenDetail(s.event.id) },
-                            onQuickRecord = {
-                                vm.quickRecord(s.event.id) { name ->
-                                    onDataChanged()
-                                    scope.launch {
-                                        snack.showSnackbar("已记录：$name", actionLabel = "撤销")
-                                    }
+                    verticalArrangement = Arrangement.spacedBy(
+                        if (layoutMode == HomeLayoutMode.COMPACT) 8.dp else 10.dp
+                    )
+                ) { s, _, _, _ ->
+                    EventCard(
+                        status = s,
+                        density = density,
+                        onClick = { onOpenDetail(s.event.id) },
+                        onQuickRecord = {
+                            vm.quickRecord(s.event.id) { name ->
+                                onDataChanged()
+                                scope.launch {
+                                    snack.showSnackbar("已记录：$name", actionLabel = "撤销")
                                 }
                             }
-                        )
+                        }
+                    )
+                    if (layoutMode == HomeLayoutMode.COMPACT) {
+                        Spacer(Modifier.height(0.dp))
                     }
-                    item { Spacer(Modifier.height(80.dp)) }
                 }
             }
         }
@@ -344,6 +402,102 @@ private fun TemplateSheet(vm: ListViewModel, onDone: (Int) -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(12.dp)
             ) { Text("导入 ${selected.size} 个") }
+        }
+    }
+}
+
+/**
+ * 分组模式的列表。
+ *
+ * 设计取舍：
+ * - **默认全部展开**。点开才看到事件会多一层操作，
+ *   违背「一眼看到所有该做的事」。折叠权交给用户。
+ * - 每组末尾加底部留白，让最后一组也能滚到底。
+ */
+@Composable
+private fun GroupedList(
+    visible: List<EventStatusLite>,
+    collapsed: Set<String>,
+    density: CardDensity,
+    onToggleCollapse: (String) -> Unit,
+    onOpenDetail: (Long) -> Unit,
+    onQuickRecord: (Long) -> Unit
+) {
+    // 无标签的归到「未分类」，避免事件凭空消失
+    val groups = remember(visible) {
+        visible
+            .groupBy { it.event.tag?.takeIf { t -> t.isNotBlank() } ?: "未分类" }
+            .toList()
+            .sortedBy { it.first }
+    }
+
+    LazyColumn(
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        groups.forEach { (tag, list) ->
+            // stickyHeader：滑动时分类名固定在顶部，
+            // 快速滑动时始终知道自己在哪个分类
+            stickyHeader(key = "tag_$tag") {
+                GroupHeader(
+                    tag = tag,
+                    count = list.size,
+                    collapsed = tag in collapsed,
+                    onToggle = { onToggleCollapse(tag) }
+                )
+            }
+            if (tag !in collapsed) {
+                items(list, key = { it.event.id }) { s ->
+                    EventCard(
+                        status = s,
+                        density = density,
+                        onClick = { onOpenDetail(s.event.id) },
+                        onQuickRecord = { onQuickRecord(s.event.id) }
+                    )
+                }
+            }
+        }
+        item { Spacer(Modifier.height(80.dp)) }
+    }
+}
+
+@Composable
+private fun GroupHeader(
+    tag: String,
+    count: Int,
+    collapsed: Boolean,
+    onToggle: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (collapsed) "▸" else "▾",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                tag,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "$count",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
