@@ -276,6 +276,21 @@ class LifeLogRepository(private val context: Context) {
     suspend fun setArchived(eventId: Long, archived: Boolean) =
         withContext(Dispatchers.IO) { dao.setArchived(eventId, archived) }
 
+    /**
+     * 保存手动排序。
+     *
+     * @param orderedIds 拖拽后的**完整**顺序（当前可见范围内），
+     *                   下标即新的 sortOrder。
+     *
+     * 为什么传完整列表而不是单个移动：拖拽过程中列表可能连续变化，
+     * 只提交「谁移动了」容易与实际顺序脱节。
+     */
+    suspend fun saveSortOrder(orderedIds: List<Long>) = withContext(Dispatchers.IO) {
+        orderedIds.forEachIndexed { index, id ->
+            dao.updateSortOrder(id, index)
+        }
+    }
+
     /** 导入模板：只导入当前还不存在的同名事件。 */
     suspend fun importTemplates(names: Set<String>): Int = withContext(Dispatchers.IO) {
         insertTemplates(Templates.ALL.filter { it.name in names })
