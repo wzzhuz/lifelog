@@ -48,9 +48,7 @@ fun EventCard(
     onClick: () -> Unit,
     onQuickRecord: () -> Unit,
     modifier: Modifier = Modifier,
-    density: CardDensity = CardDensity.COMPACT,
-    /** 拖拽手柄（分组模式等场景下可置空表示不支持拖拽） */
-    dragHandle: (@Composable () -> Unit)? = null
+    density: CardDensity = CardDensity.COMPACT
 ) {
     val barColor by animateColorAsState(
         targetValue = freshnessColor(status.freshness),
@@ -63,8 +61,7 @@ fun EventCard(
             barColor = barColor,
             onClick = onClick,
             onQuickRecord = onQuickRecord,
-            modifier = modifier,
-            dragHandle = dragHandle
+            modifier = modifier
         )
     } else {
         ComfortCard(
@@ -72,8 +69,7 @@ fun EventCard(
             barColor = barColor,
             onClick = onClick,
             onQuickRecord = onQuickRecord,
-            modifier = modifier,
-            dragHandle = dragHandle
+            modifier = modifier
         )
     }
 }
@@ -90,8 +86,7 @@ private fun CompactCard(
     barColor: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
     onQuickRecord: () -> Unit,
-    modifier: Modifier = Modifier,
-    dragHandle: (@Composable () -> Unit)? = null
+    modifier: Modifier = Modifier
 ) {
     Surface(
         modifier = modifier
@@ -141,9 +136,6 @@ private fun CompactCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (dragHandle != null) {
-                        dragHandle()
-                    }
                     Spacer(Modifier.width(4.dp))
                     IconButton(
                         onClick = onQuickRecord,
@@ -180,8 +172,7 @@ private fun ComfortCard(
     barColor: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
     onQuickRecord: () -> Unit,
-    modifier: Modifier = Modifier,
-    dragHandle: (@Composable () -> Unit)? = null
+    modifier: Modifier = Modifier
 ) {
     Surface(
         modifier = modifier
@@ -213,7 +204,6 @@ private fun ComfortCard(
                     )
                     Spacer(Modifier.width(6.dp))
                     StatusChip(status.freshness)
-                    if (dragHandle != null) dragHandle()
                 }
 
                 Spacer(Modifier.height(4.dp))

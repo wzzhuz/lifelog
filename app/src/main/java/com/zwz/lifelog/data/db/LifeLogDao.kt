@@ -105,9 +105,21 @@ interface LifeLogDao {
      * 拖拽结束后一次性写回，避免每移动一格就写一次库。
      * 参数是有序的事件 id 列表，下标即新的 sortOrder。
      */
-    @androidx.room.Transaction
     @Query("UPDATE events SET sortOrder = :order WHERE id = :id")
     suspend fun updateSortOrder(id: Long, order: Int)
+
+    /**
+     * 整批写入排序。
+     *
+     * 必须包在**一个事务**里：逐条 UPDATE 会让 Flow 发射 N 次，
+     * 每次都带着「改了一半」的中间状态，UI 端的同步逻辑
+     * 会被这些中间态反复打断，最终顺序可能与拖拽结果不一致。
+     * 一个事务只发射一次，拿到就是最终状态。
+     */
+    @androidx.room.Transaction
+    suspend fun updateSortOrders(ids: List<Long>) {
+        ids.forEachIndexed { index, id -> updateSortOrder(id, index) }
+    }
 
     @Query("SELECT * FROM events WHERE isArchived = 0 ORDER BY sortOrder ASC, name ASC")
     suspend fun activeEventsSorted(): List<EventEntity>
