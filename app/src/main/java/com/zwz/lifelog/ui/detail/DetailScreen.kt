@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -40,6 +41,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -77,6 +79,7 @@ fun DetailScreen(
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
+    var askArchive by remember { mutableStateOf(false) }
     val s = status
 
     Scaffold(
@@ -111,10 +114,7 @@ fun DetailScreen(
                             )
                             DropdownMenuItem(
                                 text = { Text("归档") },
-                                onClick = {
-                                    menu = false
-                                    vm.setArchived(true) { onDataChanged(); onBack() }
-                                }
+                                onClick = { menu = false; askArchive = true }
                             )
                             DropdownMenuItem(
                                 text = { Text("删除事件", color = MaterialTheme.colorScheme.error) },
@@ -273,6 +273,30 @@ fun DetailScreen(
                 item { Spacer(Modifier.height(60.dp)) }
             }
         }
+    }
+
+    // 归档前确认：归档曾是无提示的单向操作，
+    // 用户不知道去哪找回，这里明确告知恢复路径。
+    if (askArchive) {
+        AlertDialog(
+            onDismissRequest = { askArchive = false },
+            title = { Text("归档「${s?.event?.name ?: ""}」？") },
+            text = {
+                Text(
+                    "归档后不显示在首页，但记录会完整保留。\n\n" +
+                        "之后可在「设置 → 已归档事件」中查看、恢复或彻底删除。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    askArchive = false
+                    vm.setArchived(true) { onDataChanged(); onBack() }
+                }) { Text("归档") }
+            },
+            dismissButton = {
+                TextButton(onClick = { askArchive = false }) { Text("取消") }
+            }
+        )
     }
 }
 
