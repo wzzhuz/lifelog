@@ -2,7 +2,11 @@ name: Build APK
 
 on:
   push:
-    branches: [main, master, 'feature/**']
+    # 用通配符覆盖全部分支，而不是逐个列前缀。
+    # 此前只写了 [main, master, 'feature/**']，导致 fix/ 等非 feature
+    # 前缀的分支推送后**不会触发编译**——分支存在、提交也在，
+    # 但 Actions 静默不跑，很容易误以为「编译通过了」。
+    branches: ['**']
     tags: ['v*']
   pull_request:
     branches: [main, master]
