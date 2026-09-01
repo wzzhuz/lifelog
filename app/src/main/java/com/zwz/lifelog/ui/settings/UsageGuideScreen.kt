@@ -138,12 +138,9 @@ fun UsageGuideScreen(onBack: () -> Unit) {
             // ---------- 5. 首页布局与排序 ----------
             GuideSection(title = "首页怎么排、怎么换样子") {
                 Text(
-                    "设置页「首页布局」可切换三种模式：
-" +
-                        "• 紧凑：一屏约 8~9 个，信息精简
-" +
-                        "• 舒适：一屏约 5~6 个，信息最完整
-" +
+                    "设置页「首页布局」可切换三种模式：\n" +
+                        "• 紧凑：一屏约 8~9 个，信息精简\n" +
+                        "• 舒适：一屏约 5~6 个，信息最完整\n" +
                         "• 按分类分组：同类事件归在一起，点分类名可折叠",
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -166,15 +163,13 @@ fun UsageGuideScreen(onBack: () -> Unit) {
             // ---------- 6. 归档 ----------
             GuideSection(title = "不用的事件怎么收起来") {
                 Text(
-                    "进事件详情页 → 右上角 ⋮ → 归档。
-" +
+                    "进事件详情页 → 右上角 ⋮ → 归档。\n" +
                         "归档后该事件不显示在首页，但**记录完整保留**。",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "随时可在「设置 → 已归档事件」中查看、恢复或彻底删除。
-" +
+                    "随时可在「设置 → 已归档事件」中查看、恢复或彻底删除。\n" +
                         "彻底删除会连带删除该事件的所有记录，删除前会二次确认。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
