@@ -135,7 +135,34 @@ fun UsageGuideScreen(onBack: () -> Unit) {
                 )
             }
 
-            // ---------- 5. 数据 ----------
+            // ---------- 5. 模板 ----------
+            GuideSection(title = "事件从哪来") {
+                Text(
+                    "新建事件有两个途径：
+" +
+                        "• 首页右下角 + 号，从零创建
+" +
+                        "• 设置页「模板」分组，从 34 个预置模板里挑
+",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "模板入口可以随时再来，不是只有第一次能导入。" +
+                        "已经添加过的模板会置灰，不会重复。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "也可以从文件导入模板（JSON 格式），" +
+                        "适合一次性添加一批自定义事件。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // ---------- 6. 数据 ----------
             GuideSection(title = "数据存在哪、怎么备份") {
                 Text(
                     "• 只存在手机本地，不联网、不上传、无账号\n" +
