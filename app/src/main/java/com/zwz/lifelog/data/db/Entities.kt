@@ -29,6 +29,15 @@ data class EventEntity(
     val isPinned: Boolean = false,
     val isArchived: Boolean = false,
     val sortOrder: Int = 0,
+    /**
+     * 分组模式下的组内顺序。
+     *
+     * 与 sortOrder 分开存储的原因：两种模式的排序语义不同——
+     * 列表模式是全局顺序，分组模式是「先按标签分组、组内再排」。
+     * 共用一个字段时，在分组里拖一下会把全局顺序重写成
+     * 按标签排列的完整顺序，切回列表模式就全乱了。
+     */
+    val sortInGroup: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -77,6 +86,7 @@ fun EventEntity.toDomain(): com.zwz.lifelog.domain.model.Event =
         isPinned = isPinned,
         isArchived = isArchived,
         sortOrder = sortOrder,
+        sortInGroup = sortInGroup,
         createdAt = createdAt
     )
 
@@ -92,6 +102,7 @@ fun com.zwz.lifelog.domain.model.Event.toEntity(): EventEntity =
         isPinned = isPinned,
         isArchived = isArchived,
         sortOrder = sortOrder,
+        sortInGroup = sortInGroup,
         createdAt = createdAt
     )
 
