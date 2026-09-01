@@ -40,10 +40,36 @@ enum class Freshness { NONE, FRESH, SOON, DUE }
 
 /**
  * 事件 + 其派生状态，UI 层直接消费这个对象。
+ *
+ * 注意：包含完整的 records 列表，**仅供详情页使用**。
+ * 首页列表请用 [EventStatusLite]——它不携带记录列表，
+ * 只靠 SQL 聚合统计得出，避免把上万条记录全部加载进内存。
  */
 data class EventStatus(
     val event: Event,
     val records: List<Record>,
+    val lastTimestamp: Long?,
+    val daysSince: Int?,
+    val avgGapMillis: Long?,
+    val baselineDays: Int,
+    val freshness: Freshness,
+    val ratio: Float,
+    val predictedNextMillis: Long?
+)
+
+/**
+ * 首页列表专用的轻量状态。
+ *
+ * 与 [EventStatus] 的区别：**不携带 records 列表**。
+ * 字段由 SQL 聚合查询直接算出（COUNT / MIN / MAX），
+ * 无需把该事件的历史记录读进内存，因此列表渲染开销
+ * 与总记录数无关，只与事件数有关（通常几十个）。
+ *
+ * @param recordCount 该事件的历史记录条数
+ */
+data class EventStatusLite(
+    val event: Event,
+    val recordCount: Int,
     val lastTimestamp: Long?,
     val daysSince: Int?,
     val avgGapMillis: Long?,
@@ -86,6 +112,20 @@ object Templates {
         Template("换毛巾", "\uD83E\uDDFC", 30, "家务"),
         Template("清理冰箱", "\uD83E\uDDCA", 90, "家务"),
         Template("换机油", "\uD83D\uDEE2\uFE0F", 180, "汽车"),
-        Template("整理照片", "\uD83D\uDCF7", 90, "数码")
+        Template("整理照片", "\uD83D\uDCF7", 90, "数码"),
+
+        // ---- 健康调理 ----
+        Template("吃药", "\uD83D\uDC8A", 1, "健康"),
+        Template("中药调理", "\uD83C\uDF75", null, "健康"),
+        Template("针灸", "\uD83E\uDEA8", null, "健康"),
+        Template("贴膏药", "\uD83E\uDDF4", null, "健康"),
+        Template("量血压", "\uD83E\uDED0", 7, "健康"),
+        Template("测血糖", "\uD83E\uDE78", 7, "健康"),
+
+        // ---- 夫妻日常 ----
+        Template("同房", "\uD83D\uDC97", null, "夫妻"),
+        Template("约会", "\uD83C\uDF77", 30, "夫妻"),
+        Template("结婚纪念日", "\uD83D\uDC8D", 365, "夫妻"),
+        Template("一起看电影", "\uD83C\uDFAC", 30, "夫妻")
     )
 }

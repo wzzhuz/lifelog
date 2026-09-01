@@ -6,6 +6,9 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    // Room 的 DAO 实现在编译期生成，需要注解处理器。
+    // 用 KSP 而非 kapt：更快，且 kapt 在新版 AGP 上已不再推荐
+    id("com.google.devtools.ksp")
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +147,15 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.1.1")
     // Glance 的状态存储基于 DataStore，显式声明避免版本传递问题
     implementation("androidx.datastore:datastore-preferences:1.1.7")
+
+    // ---- Room（本地数据库）----
+    // 从「全量 JSON 文件」迁过来的原因：记录上万后，
+    // 每次写入都要重新序列化整个文件，开销随数据量线性增长。
+    // Room 只写变更的那一行。
+    val roomVersion = "2.8.4"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
 
     // ---- 基础 ----
     implementation("androidx.core:core-ktx:1.16.0")

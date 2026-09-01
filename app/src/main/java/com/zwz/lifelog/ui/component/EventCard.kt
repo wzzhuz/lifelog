@@ -30,7 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.zwz.lifelog.domain.model.EventStatus
+import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Freshness
 import com.zwz.lifelog.util.TimeFormatter
 
@@ -52,7 +52,7 @@ fun freshnessLabel(f: Freshness): String = when (f) {
 
 @Composable
 fun EventCard(
-    status: EventStatus,
+    status: EventStatusLite,
     onClick: () -> Unit,
     onQuickRecord: () -> Unit,
     modifier: Modifier = Modifier
@@ -169,12 +169,12 @@ private fun StatusChip(f: Freshness) {
 }
 
 @Composable
-private fun subtitleOf(s: EventStatus): String {
+private fun subtitleOf(s: EventStatusLite): String {
     if (s.lastTimestamp == null) return "添加后点右侧 ✓ 记一笔"
     val parts = mutableListOf<String>()
     parts.add("上次 ${TimeFormatter.agoWithDate(s.lastTimestamp)}")
     if (s.avgGapMillis != null) parts.add("平均 ${TimeFormatter.duration(s.avgGapMillis)}")
-    if (s.records.size >= 2 && s.predictedNextMillis != null) {
+    if (s.recordCount >= 2 && s.predictedNextMillis != null) {
         parts.add("预计 ${TimeFormatter.dateOnly(s.predictedNextMillis)}")
     }
     return parts.joinToString(" · ")

@@ -101,10 +101,8 @@ class SingleWidget : GlanceAppWidget() {
             runCatching {
                 val repo = com.zwz.lifelog.di.ServiceLocator.provideRepository(context)
                 repo.load()
-                val snap = repo.allRaw()
-                val ev = snap.events.firstOrNull { it.id == eventId } ?: return@runCatching null
-                val recs = snap.records.filter { it.eventId == ev.id }.sortedBy { it.timestamp }
-                com.zwz.lifelog.domain.usecase.StatusCalculator.compute(ev, recs)
+                // 只查这一个事件，不再把全部记录读出来再筛选
+                repo.statusOfOnce(eventId)
             }.getOrNull()
         }
 }

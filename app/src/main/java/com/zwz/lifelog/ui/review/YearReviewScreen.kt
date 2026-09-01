@@ -59,6 +59,23 @@ private fun monthOf(timestamp: Long): Int {
     return cal.get(Calendar.MONTH) + 1
 }
 
+/** 某年的起止时间戳 [1月1日 00:00, 次年1月1日 00:00)。 */
+private fun yearRange(year: Int): Pair<Long, Long> {
+    val from = Calendar.getInstance().apply {
+        clear()
+        set(Calendar.YEAR, year)
+        set(Calendar.MONTH, Calendar.JANUARY)
+        set(Calendar.DAY_OF_MONTH, 1)
+    }.timeInMillis
+    val to = Calendar.getInstance().apply {
+        clear()
+        set(Calendar.YEAR, year + 1)
+        set(Calendar.MONTH, Calendar.JANUARY)
+        set(Calendar.DAY_OF_MONTH, 1)
+    }.timeInMillis
+    return from to to
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun YearReviewScreen(repo: LifeLogRepository, onBack: () -> Unit) {
@@ -71,14 +88,16 @@ fun YearReviewScreen(repo: LifeLogRepository, onBack: () -> Unit) {
         key1 = year,
         key2 = repo
     ) {
-        val snap = repo.allRaw()
-        val list: List<YearStat> = snap.events
+        // 只查这一年的记录，而不是把全部记录读出来再按年份过滤
+        val (from, to) = yearRange(year)
+        val yearRecords = repo.recordsBetween(from, to)
+        val byEvent = yearRecords.groupBy { it.eventId }
+
+        val list: List<YearStat> = repo.allEvents()
             .filter { !it.isArchived }
             .map { ev ->
-                val times: List<Long> = snap.records
-                    .filter { r -> r.eventId == ev.id && yearOf(r.timestamp) == year }
-                    .map { r -> r.timestamp }
-                    .sorted()
+                val times: List<Long> =
+                    (byEvent[ev.id] ?: emptyList()).map { it.timestamp }.sorted()
                 YearStat(
                     event = ev,
                     count = times.size,

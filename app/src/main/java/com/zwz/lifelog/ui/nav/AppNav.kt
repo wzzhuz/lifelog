@@ -20,6 +20,7 @@ import com.zwz.lifelog.ui.list.ListScreen
 import com.zwz.lifelog.ui.list.ListViewModel
 import com.zwz.lifelog.ui.review.YearReviewScreen
 import com.zwz.lifelog.ui.settings.SettingsScreen
+import com.zwz.lifelog.ui.settings.UsageGuideScreen
 import com.zwz.lifelog.ui.timeline.TimelineScreen
 import com.zwz.lifelog.ui.timeline.TimelineViewModel
 import com.zwz.lifelog.util.LifeLogViewModelFactory
@@ -32,6 +33,7 @@ object Route {
     const val EDIT_EVENT = "edit_event/{eventId}"
     const val ADD_RECORD = "add_record/{eventId}/{recordId}"
     const val YEAR_REVIEW = "year_review"
+    const val USAGE_GUIDE = "usage_guide"
 
     fun detail(eventId: Long) = "detail/$eventId"
     fun editEvent(eventId: Long) = "edit_event/$eventId"
@@ -72,12 +74,18 @@ fun AppNav(
             SettingsScreen(
                 repo = repo,
                 onBack = { nav.popBackStack() },
-                onOpenYearReview = { nav.navigate(Route.YEAR_REVIEW) }
+                onOpenYearReview = { nav.navigate(Route.YEAR_REVIEW) },
+                onOpenUsageGuide = { nav.navigate(Route.USAGE_GUIDE) },
+                onDataChanged = onDataChanged
             )
         }
 
         composable(Route.YEAR_REVIEW) {
             YearReviewScreen(repo = repo, onBack = { nav.popBackStack() })
+        }
+
+        composable(Route.USAGE_GUIDE) {
+            UsageGuideScreen(onBack = { nav.popBackStack() })
         }
 
         composable(
