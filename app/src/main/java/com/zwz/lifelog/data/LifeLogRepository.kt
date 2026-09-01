@@ -52,6 +52,21 @@ class LifeLogRepository(private val context: Context) {
      * **不加载任何记录**，只用一次 GROUP BY 拿到每个事件的
      * 条数与首尾时间，因此开销与总记录数无关。
      */
+    /** 分组模式的事件流：按标签归组 + 组内 sortInGroup 排序。 */
+    fun statusesLiteGrouped(): Flow<List<EventStatusLite>> =
+        combine(dao.observeActiveEventsGrouped(), dao.observeAllStats()) { events, stats ->
+            val byEvent = stats.associateBy { it.eventId }
+            events.map { ev ->
+                val s = byEvent[ev.id]
+                StatusCalculator.computeLite(
+                    event = ev.toDomain(),
+                    count = s?.count ?: 0,
+                    firstAsc = s?.firstTs,
+                    lastAsc = s?.lastTs
+                )
+            }
+        }
+
     fun statusesLite(): Flow<List<EventStatusLite>> =
         combine(dao.observeActiveEvents(), dao.observeAllStats()) { events, stats ->
             val byEvent = stats.associateBy { it.eventId }
@@ -104,6 +119,38 @@ class LifeLogRepository(private val context: Context) {
      *
      * 只加载这一个事件的记录，不会牵连其他事件。
      */
+    /**
+     * 详情页分页状态。
+     *
+     * 与 [statusOf] 的区别：记录只取最近 [limit] 条，
+     * 而统计信息（次数 / 平均间隔 / 预测）走 SQL 聚合，仍基于全量数据。
+     *
+     * **为什么统计不能用分页结果算**：
+     * 分页后内存里只有 20 条，拿它算「累计次数」会得到 20 而不是真实总数，
+     * 「平均间隔」也会因为只覆盖最近一段而失真。
+     */
+    fun statusOfPaged(eventId: Long, limit: Int): Flow<EventStatus?> =
+        combine(
+            dao.observeEvent(eventId),
+            dao.observeStatsOf(eventId),
+            dao.observeRecordsPage(eventId, limit)
+        ) { ev, stats, recs ->
+            if (ev == null) null
+            else StatusCalculator.computePaged(
+                event = ev.toDomain(),
+                recordsDesc = recs.map { it.toDomain() },
+                count = stats?.count ?: 0,
+                firstAsc = stats?.firstTs,
+                lastAsc = stats?.lastTs
+            )
+        }
+
+    /** 载入更早的一批记录。返回本次新载入的条数。 */
+    suspend fun loadMoreRecords(eventId: Long, limit: Int, offset: Int): List<Record> =
+        withContext(Dispatchers.IO) {
+            dao.recordsPage(eventId, limit, offset).map { it.toDomain() }
+        }
+
     fun statusOf(eventId: Long): Flow<EventStatus?> =
         combine(
             dao.observeEvent(eventId),
@@ -287,6 +334,17 @@ class LifeLogRepository(private val context: Context) {
      */
     suspend fun saveSortOrder(orderedIds: List<Long>) = withContext(Dispatchers.IO) {
         dao.updateSortOrders(orderedIds)
+    }
+
+    /**
+     * 保存分组模式下的组内顺序。
+     *
+     * 注意：编号是**相对传入列表**的，而传入的是组内可见项。
+     * 组外事件保持各自的 sortInGroup 不变——因为分组模式下
+     * 各组之间本来就按标签名排序，不需要跨组编号。
+     */
+    suspend fun saveGroupOrder(orderedIds: List<Long>) = withContext(Dispatchers.IO) {
+        dao.updateSortInGroups(orderedIds)
     }
 
     /** 导入模板：只导入当前还不存在的同名事件。 */

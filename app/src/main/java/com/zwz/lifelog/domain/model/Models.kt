@@ -17,6 +17,8 @@ data class Event(
     val isPinned: Boolean = false,
     val isArchived: Boolean = false,
     val sortOrder: Int = 0,
+    /** 分组模式下的组内顺序，与 sortOrder 互不干扰。 */
+    val sortInGroup: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -48,6 +50,13 @@ enum class Freshness { NONE, FRESH, SOON, DUE }
 data class EventStatus(
     val event: Event,
     val records: List<Record>,
+    /**
+     * 该事件的**全部**记录条数。
+     *
+     * 分页后 [records] 只含最近若干条，这个字段才是真实总数——
+     * 由 SQL COUNT 得出，不依赖已加载的记录。
+     */
+    val recordCount: Int = records.size,
     val lastTimestamp: Long?,
     val daysSince: Int?,
     val avgGapMillis: Long?,

@@ -147,8 +147,9 @@ fun UsageGuideScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "紧凑与舒适模式下，**长按卡片可以拖动排序**，" +
-                        "把常用的排到前面。松手后顺序自动保存。\n" +
-                        "分组模式下也能拖，但**只能在同一个分类内**移动。",
+                        "按住后可以自由上下移动，到想要的位置松手即可。\n" +
+                        "分组模式下也能拖，但**只能在同一个分类内**移动。\n" +
+                        "两种模式的顺序是**各自独立记忆**的，互不影响。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
                 )

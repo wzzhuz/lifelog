@@ -98,6 +98,73 @@ object StatusCalculator {
         )
     }
 
+    /**
+     * 分页版状态计算。
+     *
+     * 与 [compute] 的区别：
+     * - `recordsDesc` 只是**最近若干条**（倒序），不含全部历史
+     * - 统计信息由 [count] / [firstAsc] / [lastAsc] 提供，
+     *   这三个值走 SQL 聚合，基于**全量**记录
+     *
+     * 因此即使这个事件有 5000 条记录，详情页也只加载 20 条，
+     * 但显示的「累计次数」仍是 5000。
+     */
+    fun computePaged(
+        event: Event,
+        recordsDesc: List<Record>,
+        count: Int,
+        firstAsc: Long?,
+        lastAsc: Long?,
+        now: Long = System.currentTimeMillis()
+    ): EventStatus {
+        val avg: Long? = if (count >= 2 && firstAsc != null && lastAsc != null) {
+            val span = lastAsc - firstAsc
+            if (span > 0L) span / (count - 1).toLong() else null
+        } else null
+
+        if (lastAsc == null) {
+            return EventStatus(
+                event = event,
+                records = emptyList(),
+                recordCount = 0,
+                lastTimestamp = null,
+                daysSince = null,
+                avgGapMillis = null,
+                baselineDays = event.targetDays ?: DEFAULT_BASELINE_DAYS,
+                freshness = Freshness.NONE,
+                ratio = 0f,
+                predictedNextMillis = null
+            )
+        }
+
+        val d: Int = daysSince(lastAsc, now)
+        val baselineDays: Float = when {
+            event.targetDays != null && event.targetDays > 0 -> event.targetDays.toFloat()
+            avg != null && avg > 0L -> avg.toFloat() / DAY_MILLIS.toFloat()
+            else -> DEFAULT_BASELINE_DAYS.toFloat()
+        }
+        val safeBaseline: Float = if (baselineDays < 1f) 1f else baselineDays
+        val ratio: Float = d.toFloat() / safeBaseline
+        val freshness: Freshness = when {
+            ratio >= 1f -> Freshness.DUE
+            ratio >= 0.75f -> Freshness.SOON
+            else -> Freshness.FRESH
+        }
+
+        return EventStatus(
+            event = event,
+            records = recordsDesc,
+            recordCount = count,
+            lastTimestamp = lastAsc,
+            daysSince = d,
+            avgGapMillis = avg,
+            baselineDays = safeBaseline.roundToInt(),
+            freshness = freshness,
+            ratio = ratio,
+            predictedNextMillis = lastAsc + (safeBaseline * DAY_MILLIS.toFloat()).toLong()
+        )
+    }
+
     fun compute(
         event: Event,
         recordsAsc: List<Record>,

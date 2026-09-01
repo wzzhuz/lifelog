@@ -33,6 +33,26 @@ interface LifeLogDao {
     @Query("SELECT * FROM events WHERE isArchived = 0 ORDER BY isPinned DESC, sortOrder ASC, name ASC")
     fun observeActiveEvents(): Flow<List<EventEntity>>
 
+    /**
+     * 分组模式的顺序：先按标签归组，组内按 sortInGroup 排。
+     *
+     * 与 [observeActiveEvents] 分开，两个字段各管各的模式，
+     * 互不污染。NULL 标签排最后（SQLite 默认 NULL 最小，
+     * 这里用 CASE 显式调整，避免「未分类」凭空跑到最前）。
+     */
+    @Query(
+        """
+        SELECT * FROM events
+        WHERE isArchived = 0
+        ORDER BY CASE WHEN tag IS NULL OR tag = '' THEN 1 ELSE 0 END,
+                 tag ASC,
+                 isPinned DESC,
+                 sortInGroup ASC,
+                 name ASC
+        """
+    )
+    fun observeActiveEventsGrouped(): Flow<List<EventEntity>>
+
     @Query("SELECT * FROM events WHERE isArchived = 1 ORDER BY name ASC")
     fun observeArchivedEvents(): Flow<List<EventEntity>>
 
@@ -81,6 +101,23 @@ interface LifeLogDao {
     )
     suspend fun recordsPage(eventId: Long, limit: Int, offset: Int): List<RecordEntity>
 
+    /**
+     * 最近若干条记录的流（用于详情页首屏）。
+     *
+     * 持续订阅，新增记录时自动刷新。
+     * 更早的记录通过 [recordsPage] 按需载入，不进这个流——
+     * 否则用户每加载一批，首屏就要重组一次。
+     */
+    @Query(
+        """
+        SELECT * FROM records
+        WHERE eventId = :eventId
+        ORDER BY timestamp DESC
+        LIMIT :limit
+        """
+    )
+    fun observeRecordsPage(eventId: Long, limit: Int): kotlinx.coroutines.flow.Flow<List<RecordEntity>>
+
     @Query("SELECT COUNT(*) FROM events")
     fun observeEventCount(): Flow<Int>
 
@@ -119,6 +156,15 @@ interface LifeLogDao {
     @androidx.room.Transaction
     suspend fun updateSortOrders(ids: List<Long>) {
         ids.forEachIndexed { index, id -> updateSortOrder(id, index) }
+    }
+
+    @Query("UPDATE events SET sortInGroup = :order WHERE id = :id")
+    suspend fun updateSortInGroup(id: Long, order: Int)
+
+    /** 分组模式排序：同样整批事务写入。 */
+    @androidx.room.Transaction
+    suspend fun updateSortInGroups(ids: List<Long>) {
+        ids.forEachIndexed { index, id -> updateSortInGroup(id, index) }
     }
 
     @Query("SELECT * FROM events WHERE isArchived = 0 ORDER BY sortOrder ASC, name ASC")
@@ -196,6 +242,27 @@ interface LifeLogDao {
         """
     )
     suspend fun statsOf(eventId: Long): EventStats?
+
+    /**
+     * 单个事件的聚合统计（持续订阅）。
+     *
+     * 详情页分页后，内存里只有最近 20 条记录，
+     * 但「累计次数 / 平均间隔 / 预测下次」需要**全量**数据。
+     * 这里用 COUNT / MIN / MAX 一次算完，不加载记录行。
+     */
+    @Query(
+        """
+        SELECT :eventId AS eventId,
+               COUNT(r.id) AS count,
+               MIN(r.timestamp) AS firstTs,
+               MAX(r.timestamp) AS lastTs
+        FROM events e
+        LEFT JOIN records r ON r.eventId = e.id
+        WHERE e.id = :eventId
+        GROUP BY e.id
+        """
+    )
+    fun observeStatsOf(eventId: Long): kotlinx.coroutines.flow.Flow<EventStats?>
 
     // ---------- 搜索 ----------
 
