@@ -101,6 +101,23 @@ interface LifeLogDao {
     )
     suspend fun recordsPage(eventId: Long, limit: Int, offset: Int): List<RecordEntity>
 
+    /**
+     * 最近若干条记录的流（用于详情页首屏）。
+     *
+     * 持续订阅，新增记录时自动刷新。
+     * 更早的记录通过 [recordsPage] 按需载入，不进这个流——
+     * 否则用户每加载一批，首屏就要重组一次。
+     */
+    @Query(
+        """
+        SELECT * FROM records
+        WHERE eventId = :eventId
+        ORDER BY timestamp DESC
+        LIMIT :limit
+        """
+    )
+    fun observeRecordsPage(eventId: Long, limit: Int): kotlinx.coroutines.flow.Flow<List<RecordEntity>>
+
     @Query("SELECT COUNT(*) FROM events")
     fun observeEventCount(): Flow<Int>
 
@@ -225,6 +242,27 @@ interface LifeLogDao {
         """
     )
     suspend fun statsOf(eventId: Long): EventStats?
+
+    /**
+     * 单个事件的聚合统计（持续订阅）。
+     *
+     * 详情页分页后，内存里只有最近 20 条记录，
+     * 但「累计次数 / 平均间隔 / 预测下次」需要**全量**数据。
+     * 这里用 COUNT / MIN / MAX 一次算完，不加载记录行。
+     */
+    @Query(
+        """
+        SELECT :eventId AS eventId,
+               COUNT(r.id) AS count,
+               MIN(r.timestamp) AS firstTs,
+               MAX(r.timestamp) AS lastTs
+        FROM events e
+        LEFT JOIN records r ON r.eventId = e.id
+        WHERE e.id = :eventId
+        GROUP BY e.id
+        """
+    )
+    fun observeStatsOf(eventId: Long): kotlinx.coroutines.flow.Flow<EventStats?>
 
     // ---------- 搜索 ----------
 
