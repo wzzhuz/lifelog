@@ -9,6 +9,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.compose.runtime.collectAsState
+import com.zwz.lifelog.data.HomeLayoutMode
+import com.zwz.lifelog.data.HomeLayoutPrefs
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.di.ServiceLocator
 import com.zwz.lifelog.ui.detail.DetailScreen
@@ -48,6 +51,12 @@ fun AppNav(
     onDataChanged: () -> Unit
 ) {
     val nav: NavHostController = rememberNavController()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val layoutMode by HomeLayoutPrefs.modeFlow(context)
+        .collectAsState(initial = HomeLayoutMode.COMPACT)
+    val collapsedTags by HomeLayoutPrefs.collapsedFlow(context)
+        .collectAsState(initial = emptySet())
 
     NavHost(navController = nav, startDestination = Route.LIST) {
 
@@ -59,7 +68,12 @@ fun AppNav(
                 onCreateEvent = { nav.navigate(Route.editEvent(0L)) },
                 onOpenTimeline = { nav.navigate(Route.TIMELINE) },
                 onOpenSettings = { nav.navigate(Route.SETTINGS) },
-                onDataChanged = onDataChanged
+                onDataChanged = onDataChanged,
+                layoutMode = layoutMode,
+                collapsedTags = collapsedTags,
+                onToggleCollapse = { tag ->
+                    scope.launch { HomeLayoutPrefs.toggleCollapsed(context, tag) }
+                }
             )
         }
 
