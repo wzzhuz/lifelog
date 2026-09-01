@@ -114,3 +114,25 @@ fun com.zwz.lifelog.domain.model.Record.toEntity(): RecordEntity =
         photoName = photoName,
         loggedAt = loggedAt
     )
+
+/**
+ * 归档事件 + 其记录条数。
+ *
+ * 单独定义而非复用 EventEntity：设置页的归档列表要显示
+ * 「这个事件有多少条记录」，而 EventEntity 没有这个字段，
+ * 直接在 UI 层二次查询会导致 N+1。
+ */
+data class ArchivedEventRow(
+    val id: Long,
+    val name: String,
+    val emoji: String,
+    val colorArgb: Int,
+    val targetDays: Int?,
+    val tag: String?,
+    val note: String?,
+    val isPinned: Boolean,
+    val isArchived: Boolean,
+    val sortOrder: Int,
+    val createdAt: Long,
+    val recordCount: Int
+)
