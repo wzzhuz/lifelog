@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.ArrowBack
@@ -76,6 +77,7 @@ fun DetailScreen(
     onDataChanged: () -> Unit
 ) {
     val status by vm.status.collectAsState()
+    val isLoadingMore by vm.isLoadingMore.collectAsState()
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
@@ -253,14 +255,24 @@ fun DetailScreen(
                 }
             } else {
                 item {
-                    Text("全部记录", style = MaterialTheme.typography.labelMedium,
+                    val shown = s.records.size
+                    val total = s.recordCount
+                    Text(
+                        if (shown < total) "最近 $shown 条（共 $total 条）"
+                        else "全部 $total 条记录",
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+                        modifier = Modifier.padding(start = 4.dp, top = 6.dp)
+                    )
                 }
-                items(s.records.sortedByDescending { it.timestamp }, key = { it.id }) { rec ->
+                // 记录已由 ViewModel 按时间倒序给出，无需再排序。
+                // 间隔用相邻两项直接相减——旧实现是每行 indexOfFirst 全表查找，
+                // 那是 O(n²)，5000 条时会有 2500 万次比较，直接卡死渲染。
+                itemsIndexed(s.records, key = { _, r -> r.id }) { i, rec ->
+                    val older = s.records.getOrNull(i + 1)
                     RecordRow(
                         rec = rec,
-                        gapMillis = gapBefore(s.records, rec),
+                        gapMillis = if (older != null) rec.timestamp - older.timestamp else null,
                         onClick = { onEditRecord(s.event.id, rec.id) },
                         onDelete = {
                             vm.deleteRecord(rec) {
@@ -269,6 +281,22 @@ fun DetailScreen(
                             }
                         }
                     )
+                }
+                if (vm.hasMore(s)) {
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isLoadingMore) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            } else {
+                                OutlinedButton(onClick = { vm.loadMore() }) {
+                                    Text("加载更早的记录")
+                                }
+                            }
+                        }
+                    }
                 }
                 item { Spacer(Modifier.height(60.dp)) }
             }
@@ -300,11 +328,6 @@ fun DetailScreen(
     }
 }
 
-private fun gapBefore(recordsAsc: List<Record>, r: Record): Long? {
-    val idx = recordsAsc.indexOfFirst { it.id == r.id }
-    if (idx <= 0) return null
-    return r.timestamp - recordsAsc[idx - 1].timestamp
-}
 
 @Composable
 private fun StatBox(value: String, label: String, modifier: Modifier = Modifier) {
