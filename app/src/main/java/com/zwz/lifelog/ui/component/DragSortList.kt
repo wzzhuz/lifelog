@@ -165,45 +165,47 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectLo
 ) {
     coroutineScope {
         androidx.compose.ui.input.pointer.awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
+            val down = androidx.compose.ui.input.pointer.AwaitPointerEventScope::class
+                .let { awaitFirstDown(requireUnconsumed = false) }
 
-            var longPressJob: kotlinx.coroutines.Job? = null
             var dragging = false
+            val longPressJob = launch {
+                delay(250)
+                dragging = true
+                onDragStart()
+            }
+            // 延迟 250ms 后由 longPressJob 置位；这里用局部标记跟踪，
+            // 避免 finally 里重复回调（onDragEnd 已保存过就不用再保存）
+            var reported = false
 
             try {
-                // 长按 250ms 进入拖拽
-                longPressJob = launch {
-                    delay(250)
-                    dragging = true
-                    onDragStart()
-                }
-
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Main)
-                    val change: PointerInputChange? = event.changes.firstOrNull { it.id == down.id }
-                        ?: break
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
 
-                    when {
-                        change.pressed.not() -> {
-                            if (dragging) onDragEnd() else longPressJob.cancel()
-                            break
+                    if (change.changedToUpIgnoreConsumed()) {
+                        if (dragging) {
+                            reported = true
+                            onDragEnd()
                         }
-                        change.positionChange().let { it.x != 0f || it.y != 0f } -> {
-                            if (dragging) {
-                                onDrag(change.positionChange().y)
-                                change.consume()
-                            } else {
-                                // 长按未成立就移动，视为滚动，放弃
-                                longPressJob.cancel()
-                                break
-                            }
+                        break
+                    }
+
+                    val delta = change.positionChange()
+                    if (delta.x != 0f || delta.y != 0f) {
+                        if (dragging) {
+                            onDrag(delta.y)
+                            change.consume()
+                        } else {
+                            // 长按未成立就移动 → 用户想滚动列表，放弃本次拖拽
+                            break
                         }
                     }
                 }
             } finally {
-                longPressJob?.cancel()
-                if (dragging) {
-                    // 若循环因异常退出，兜底收尾
+                longPressJob.cancel()
+                // 循环异常退出（如组合被取消）时兜底保存
+                if (dragging && !reported) {
                     runCatching { onDragCancel() }
                 }
             }
