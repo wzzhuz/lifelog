@@ -68,6 +68,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenYearReview: () -> Unit,
     onOpenUsageGuide: () -> Unit,
+    onOpenArchived: () -> Unit,
     onDataChanged: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -79,6 +80,7 @@ fun SettingsScreen(
     // 记录上万时，进设置页会明显卡一下。
     val eventCount by repo.eventCountFlow().collectAsState(initial = 0)
     val recordCount by repo.recordCountFlow().collectAsState(initial = 0)
+    val archivedCount by repo.archivedCountFlow().collectAsState(initial = 0)
 
     // 模板导入相关
     var showTemplatePicker by remember { mutableStateOf(false) }
@@ -249,6 +251,34 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(22.dp))
+            SectionTitle("整理")
+            OutlinedButton(
+                onClick = onOpenArchived,
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("已归档事件")
+                    Text(
+                        "$archivedCount 个",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "归档后不显示在首页，可随时恢复。",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(24.dp))
             SectionTitle("模板")
             OutlinedButton(
                 onClick = {
