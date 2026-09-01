@@ -87,6 +87,7 @@ fun ListScreen(
     val state by vm.ui.collectAsState()
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(layoutMode) { vm.onLayoutMode(layoutMode) }
     val density = when (layoutMode) {
         HomeLayoutMode.COMPACT -> CardDensity.COMPACT
         HomeLayoutMode.COMFORT, HomeLayoutMode.GROUPED -> CardDensity.COMFORT
@@ -502,6 +503,9 @@ private fun GroupedList(
         },
         onDragEnd = {
             saving = true
+            // 只提交所有 Item 的当前顺序。
+            // saveGroupOrder 会用组内下标重新编号 sortInGroup，
+            // 分组之间本来就按标签名排序，不需要跨组编号。
             onSaveOrder(rows.filterIsInstance<GroupRow.Item>().map { it.status.event.id })
             saving = false
         },
