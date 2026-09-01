@@ -161,11 +161,20 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
     /**
      * 保存拖拽后的顺序。
      *
-     * @param orderedIds 当前可见列表拖拽后的**完整**顺序
+     * @param visibleIds 当前**可见**列表拖拽后的顺序
+     *
+     * 只传可见项，这里补齐被筛掉的项再一起编号。
+     * 若只给可见项编号 0..n-1，被筛掉的项会保留旧值与之冲突，
+     * 一旦切回「不限」就会出现顺序错乱。
      */
-    fun saveOrder(orderedIds: List<Long>) = viewModelScope.launch {
-        repo.saveSortOrder(orderedIds)
+    fun saveOrder(visibleIds: List<Long>) = viewModelScope.launch {
+        val all = ui.value.all.map { it.event.id }
+        val hidden = all.filter { it !in visibleIds }
+        repo.saveSortOrder(visibleIds + hidden)
     }
+
+    /** 保存分组模式下的顺序：同样补齐不在可见范围内的项。 */
+    fun saveGroupOrder(visibleIds: List<Long>) = saveOrder(visibleIds)
 
     fun showTemplatePicker() { showTemplate.value = true }
     fun hideTemplatePicker() { showTemplate.value = false }
