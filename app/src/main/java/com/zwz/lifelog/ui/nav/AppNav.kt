@@ -2,6 +2,7 @@ package com.zwz.lifelog.ui.nav
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -10,6 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import com.zwz.lifelog.data.HomeLayoutMode
 import com.zwz.lifelog.data.HomeLayoutPrefs
 import com.zwz.lifelog.data.LifeLogRepository
