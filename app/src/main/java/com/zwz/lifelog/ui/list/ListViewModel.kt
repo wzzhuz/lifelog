@@ -44,12 +44,17 @@ data class ListUiState(
     val searchHits: Set<Long>? = null,
     val filter: Filter = Filter.ALL,
     val tagFilter: String? = null,
+    /**
+     * 全部事件的标签（不受当前筛选影响）。
+     *
+     * 曾经从「当前可见事件」推导，导致选中某个分类后
+     * 分类行只剩那一个可点，用户无法切换到别的分类。
+     */
+    val allTags: List<String> = emptyList(),
     val showTemplatePicker: Boolean = false,
     val pendingUndo: Pair<Long, Long>? = null   // (recordId, eventId)
 ) {
     val visible: List<EventStatusLite> get() = filtered(all, keyword, searchHits, filter, tagFilter)
-
-    val allTags: List<String> get() = all.mapNotNull { it.event.tag }.distinct().sorted()
 
     companion object {
         fun filtered(
@@ -132,6 +137,7 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
             searchHits = q.searchHits,
             filter = q.filter,
             tagFilter = q.tag,
+            allTags = statuses.mapNotNull { it.event.tag }.distinct().sorted(),
             showTemplatePicker = showTpl,
             pendingUndo = undo
         )
