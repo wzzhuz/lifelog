@@ -48,31 +48,7 @@ jobs:
             || (echo "缺少 app/debug.keystore" && exit 1)
 
       - name: 编译 Debug APK
-        id: build
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          mkdir -p diag
-          gradle assembleDebug --stacktrace --no-daemon 2>&1 | tee diag/build.log
-          exit $?
-
-      - name: 回传编译日志（临时排查用）
-        if: steps.build.outcome == 'failure'
-        continue-on-error: true
-        run: |
-          set +e
-          git config user.name  "ci-bot"
-          git config user.email "ci-bot@users.noreply.github.com"
-          mkdir -p ci-logs
-          { echo "=== run ${{ github.run_number }} ==="; tail -n 600 diag/build.log 2>/dev/null; } > "ci-logs/build-run-${{ github.run_number }}.txt"
-          git add ci-logs
-          git commit -q -m "ci: run ${{ github.run_number }} 编译日志" && git push -q origin "HEAD:${{ github.ref_name }}" || true
-
-      - name: 判定编译结果
-        if: steps.build.outcome == 'failure'
-        run: |
-          echo "编译失败"
-          exit 1
+        run: gradle assembleDebug --stacktrace --no-daemon
 
       - name: 计算校验值
         id: hash
