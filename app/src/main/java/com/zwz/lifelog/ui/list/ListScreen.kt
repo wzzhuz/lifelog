@@ -169,18 +169,28 @@ fun ListScreen(
                 Spacer(Modifier.height(6.dp))
             }
 
-            // 筛选
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item { Chip("全部", state.filter == Filter.ALL) { vm.onFilter(Filter.ALL) } }
-                item { Chip("该做了", state.filter == Filter.DUE) { vm.onFilter(Filter.DUE) } }
-                item { Chip("待记录", state.filter == Filter.NONE) { vm.onFilter(Filter.NONE) } }
-                item { Chip("已钉选", state.filter == Filter.PINNED) { vm.onFilter(Filter.PINNED) } }
-                val tags = state.allTags
-                items(tags) { t ->
-                    Chip(t, state.tagFilter == t) { vm.onTag(if (state.tagFilter == t) null else t) }
+            // 筛选：状态与分类是**两个独立的维度**，不是一组互斥选项。
+            // 曾经把它们放在同一行、用同样的样式，用户会理所当然认为互斥——
+            // 看到「不限」和「汽车」同时高亮就觉得是 bug。
+            // 改为两行并各自标注，从视觉上区分维度。
+            FilterRow(label = "状态") {
+                Chip("不限", state.filter == Filter.ALL) { vm.onFilter(Filter.ALL) }
+                Chip("该做了", state.filter == Filter.DUE) { vm.onFilter(Filter.DUE) }
+                Chip("待记录", state.filter == Filter.NONE) { vm.onFilter(Filter.NONE) }
+                Chip("已钉选", state.filter == Filter.PINNED) { vm.onFilter(Filter.PINNED) }
+            }
+
+            // 分类行从**全部事件**推导，而不是当前可见事件。
+            // 否则选了「汽车」之后分类行只剩「汽车」一个可点，很怪。
+            if (state.allTags.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                FilterRow(label = "分类") {
+                    Chip("不限", state.tagFilter == null) { vm.onTag(null) }
+                    state.allTags.forEach { t ->
+                        Chip(t, state.tagFilter == t) {
+                            vm.onTag(if (state.tagFilter == t) null else t)
+                        }
+                    }
                 }
             }
 
@@ -218,6 +228,29 @@ fun ListScreen(
             onDataChanged()
             scope.launch { snack.showSnackbar("已导入 $n 个事件") }
         })
+    }
+}
+
+@Composable
+private fun FilterRow(
+    label: String,
+    items: @androidx.compose.runtime.Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(34.dp)
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { items() }
+        }
     }
 }
 
