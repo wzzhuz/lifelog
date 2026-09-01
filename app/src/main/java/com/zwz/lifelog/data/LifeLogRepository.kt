@@ -2,6 +2,7 @@ package com.zwz.lifelog.data
 
 import android.content.Context
 import android.net.Uri
+import com.zwz.lifelog.data.db.ArchivedEventRow
 import com.zwz.lifelog.data.db.LifeLogDatabase
 import com.zwz.lifelog.data.db.RecordEntity
 import com.zwz.lifelog.data.db.toDomain
@@ -118,6 +119,28 @@ class LifeLogRepository(private val context: Context) {
     /** 归档事件列表。 */
     fun archivedEvents(): Flow<List<Event>> =
         dao.observeArchivedEvents().map { list -> list.map { it.toDomain() } }
+
+    /**
+     * 归档事件（含记录条数）。
+     *
+     * 设置页「已归档」用——显示条数是为了让用户在恢复或删除前
+     * 知道这个事件到底记了多少东西，避免误删有重要记录的事件。
+     */
+    fun archivedWithCount(): Flow<List<ArchivedEventRow>> = dao.observeArchivedWithCount()
+
+    /** 归档事件总数，设置页入口显示红点或小标题时用。 */
+    fun archivedCountFlow(): Flow<Int> = dao.observeArchivedCount()
+
+    /**
+     * 详情页时间线分页。
+     *
+     * 替代「归档老记录」的方案：不改数据模型，
+     * 年度回顾、导出、搜索都不受影响。
+     */
+    suspend fun recordsPage(eventId: Long, limit: Int, offset: Int): List<Record> =
+        withContext(Dispatchers.IO) {
+            dao.recordsPage(eventId, limit, offset).map { it.toDomain() }
+        }
 
     /** 全量快照。导出、时间线、年度回顾等低频页面使用。 */
     suspend fun allRaw(): JsonStore.Snapshot = withContext(Dispatchers.IO) {
