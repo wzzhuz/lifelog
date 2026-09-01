@@ -119,4 +119,6 @@ openspec/changes/<change-id>/  →  openspec/changes/archive/<日期>-<change-id
    先确认是否要建 change，而不是直接改代码
 4. **改完代码同步更新 spec**，避免 spec 与实现脱节
 5. **spec 与 `docs/` 冲突时以 spec 为准**
+   （`docs/` 只保留用户向的使用说明；技术决策在 change 的 design.md，
+   稳定约束在 project.md，架构全貌在 README）
 6. 本项目的三条铁律（低摩擦、不焦虑、数据本地）**任何改动不得违反**
