@@ -513,7 +513,7 @@ private fun GroupedList(
                 tag = row.tag,
                 count = row.count,
                 collapsed = row.collapsed,
-                onToggle = onToggleCollapse
+                onToggle = { onToggleCollapse(row.tag) }
             )
             is GroupRow.Item -> EventCard(
                 status = row.status,
