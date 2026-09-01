@@ -1,5 +1,6 @@
 package com.zwz.lifelog.ui.list
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,13 +64,14 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.text.font.FontWeight
 import com.zwz.lifelog.data.HomeLayoutMode
 import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.ui.component.CardDensity
 import com.zwz.lifelog.ui.component.DragSortLazyColumn
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ListScreen(
     vm: ListViewModel,
@@ -235,17 +237,20 @@ fun ListScreen(
                 //
                 // 关键：onReorder 只改内存里的顺序，松手才写库。
                 // 拖拽过程中每移动一格都写库会造成大量无谓 IO。
-                val ordered = remember(state.visible) {
-                    state.visible.toMutableStateList()
-                }
+                val ordered: androidx.compose.runtime.snapshots.SnapshotStateList<EventStatusLite> =
+                    remember { mutableStateListOf<EventStatusLite>() }
+                // 数据变化时重建本地顺序。
+                // 必须放在 LaunchedEffect 而非 remember 里：
+                // 在组合中直接写 SnapshotStateList 会触发循环重组。
                 LaunchedEffect(state.visible) {
-                    if (ordered.map { it.event.id } != state.visible.map { it.event.id }) {
+                    val want: List<Long> = state.visible.map { it.event.id }
+                    if (ordered.map { it.event.id } != want) {
                         ordered.clear()
                         ordered.addAll(state.visible)
                     }
                 }
 
-                DragSortLazyColumn(
+                DragSortLazyColumn<EventStatusLite>(
                     items = ordered,
                     keyOf = { it.event.id },
                     onReorder = { from, to ->
@@ -447,7 +452,7 @@ private fun GroupedList(
                 )
             }
             if (tag !in collapsed) {
-                items(list, key = { it.event.id }) { s ->
+                items(list, key = { it.event.id }) { s: EventStatusLite ->
                     EventCard(
                         status = s,
                         density = density,
