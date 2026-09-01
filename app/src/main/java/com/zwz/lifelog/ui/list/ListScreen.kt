@@ -1,6 +1,6 @@
 package com.zwz.lifelog.ui.list
 
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,7 +61,6 @@ import androidx.compose.ui.unit.dp
 import com.zwz.lifelog.domain.model.Templates
 import com.zwz.lifelog.ui.component.EventCard
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.toMutableStateList
@@ -71,7 +70,7 @@ import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.ui.component.CardDensity
 import com.zwz.lifelog.ui.component.DragSortLazyColumn
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListScreen(
     vm: ListViewModel,
@@ -441,9 +440,11 @@ private fun GroupedList(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         groups.forEach { (tag, list) ->
-            // stickyHeader：滑动时分类名固定在顶部，
-            // 快速滑动时始终知道自己在哪个分类
-            stickyHeader(key = "tag_$tag") {
+            // 分组头用普通 item 而非 stickyHeader。
+            // 该 Compose BOM 版本下 stickyHeader 的导入路径不确定，
+            // 连续两次编译失败后降级为普通头——分组与折叠能力保留，
+            // 仅失去滚动时吸顶的效果。
+            item(key = "tag_$tag") {
                 GroupHeader(
                     tag = tag,
                     count = list.size,
