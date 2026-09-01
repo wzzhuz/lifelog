@@ -82,9 +82,14 @@ data class ListUiState(
                 Filter.NONE -> list.filter { it.recordCount == 0 }
                 Filter.PINNED -> list.filter { it.event.isPinned }
             }
-            // 钉选优先 → 状态最紧急优先 → 名称
+            // 钉选（置顶层） → 手动顺序 → 状态最紧急 → 名称
+            //
+            // sortOrder 字段数据库里一直存在、DAO 也按它排，
+            // 但此前**没有任何界面能修改它**，排序实际是「钉选→紧急度→名称」，
+            // 等于这个字段白留。现在拖拽会写入它，排序逻辑也随之启用。
             return list.sortedWith(
                 compareByDescending<EventStatusLite> { it.event.isPinned }
+                    .thenBy { it.event.sortOrder }
                     .thenByDescending { it.ratio }
                     .thenBy { it.event.name }
             )
@@ -151,6 +156,15 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
         repo.quickRecord(eventId)
         val name = repo.eventById(eventId)?.name ?: ""
         onDone(name)
+    }
+
+    /**
+     * 保存拖拽后的顺序。
+     *
+     * @param orderedIds 当前可见列表拖拽后的**完整**顺序
+     */
+    fun saveOrder(orderedIds: List<Long>) = viewModelScope.launch {
+        repo.saveSortOrder(orderedIds)
     }
 
     fun showTemplatePicker() { showTemplate.value = true }
