@@ -193,7 +193,12 @@ fun DetailScreen(
                         Spacer(Modifier.height(14.dp))
 
                         Row {
-                            StatBox("${s.records.size}", "累计次数", Modifier.weight(1f))
+                            // 必须用 recordCount 而非 records.size。
+                            // records 是分页后已加载的部分（首屏 20 条），
+                            // 用它会导致「累计次数」随加载而变动——
+                            // 这正是详情页分页要避免的问题，
+                            // 统计值必须由 SQL 聚合给出真实总数。
+                            StatBox("${s.recordCount}", "累计次数", Modifier.weight(1f))
                             Spacer(Modifier.width(8.dp))
                             StatBox(
                                 if (s.avgGapMillis != null) TimeFormatter.duration(s.avgGapMillis) else "—",
@@ -203,7 +208,9 @@ fun DetailScreen(
                             StatBox("${s.baselineDays} 天", "判断基准", Modifier.weight(1f))
                         }
 
-                        if (s.predictedNextMillis != null && s.records.size >= 2) {
+                        // 同样用 recordCount：判断的是「这个事件总共记了几次」，
+                        // 而不是「屏幕上加载了几条」
+                        if (s.predictedNextMillis != null && s.recordCount >= 2) {
                             Spacer(Modifier.height(10.dp))
                             Text(
                                 "按你的节奏，预计下次：${TimeFormatter.dateOnly(s.predictedNextMillis)}",
