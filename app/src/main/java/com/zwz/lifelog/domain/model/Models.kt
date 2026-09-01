@@ -17,6 +17,8 @@ data class Event(
     val isPinned: Boolean = false,
     val isArchived: Boolean = false,
     val sortOrder: Int = 0,
+    /** 分组模式下的组内顺序，与 sortOrder 互不干扰。 */
+    val sortInGroup: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 )
 
