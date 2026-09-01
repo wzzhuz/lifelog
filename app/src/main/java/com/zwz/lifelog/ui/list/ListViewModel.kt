@@ -2,6 +2,7 @@ package com.zwz.lifelog.ui.list
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.zwz.lifelog.data.HomeLayoutMode
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Freshness
@@ -133,8 +134,29 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
     ) { kw, hits, f, t -> QueryState(kw, hits, f, t) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), QueryState())
 
+    /** 当前布局模式。由 UI 注入，决定用哪个排序字段的查询。 */
+    private val layoutFlow = MutableStateFlow(HomeLayoutMode.COMPACT)
+
+    fun onLayoutMode(mode: HomeLayoutMode) { layoutFlow.value = mode }
+
+    /**
+     * 事件列表。
+     *
+     * 两种模式走**不同的查询**：
+     * - 列表模式：ORDER BY sortOrder
+     * - 分组模式：ORDER BY tag, sortInGroup
+     *
+     * 因为两个字段各管各的排序，不能共用一个流。
+     */
+    private val statuses: StateFlow<List<EventStatusLite>> = layoutFlow
+        .flatMapLatest { mode ->
+            if (mode == HomeLayoutMode.GROUPED) repo.statusesLiteGrouped()
+            else repo.statusesLite()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val ui: StateFlow<ListUiState> = combine(
-        repo.statusesLite(), query, showTemplate, pendingUndo
+        statuses, query, showTemplate, pendingUndo
     ) { statuses, q, showTpl, undo ->
         ListUiState(
             all = statuses,
@@ -173,8 +195,16 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
         repo.saveSortOrder(visibleIds + hidden)
     }
 
-    /** 保存分组模式下的顺序：同样补齐不在可见范围内的项。 */
-    fun saveGroupOrder(visibleIds: List<Long>) = saveOrder(visibleIds)
+    /**
+     * 分组模式保存组内顺序。
+     *
+     * **只改 sortInGroup，不碰 sortOrder**。
+     * 这正是本次修复的核心：此前共用一个字段，
+     * 在分组里拖一下会把全局顺序重写成按标签排列。
+     */
+    fun saveGroupOrder(groupIds: List<Long>) = viewModelScope.launch {
+        repo.saveGroupOrder(groupIds)
+    }
 
     fun showTemplatePicker() { showTemplate.value = true }
     fun hideTemplatePicker() { showTemplate.value = false }
