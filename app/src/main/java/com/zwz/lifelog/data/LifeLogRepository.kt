@@ -286,9 +286,7 @@ class LifeLogRepository(private val context: Context) {
      * 只提交「谁移动了」容易与实际顺序脱节。
      */
     suspend fun saveSortOrder(orderedIds: List<Long>) = withContext(Dispatchers.IO) {
-        orderedIds.forEachIndexed { index, id ->
-            dao.updateSortOrder(id, index)
-        }
+        dao.updateSortOrders(orderedIds)
     }
 
     /** 导入模板：只导入当前还不存在的同名事件。 */
