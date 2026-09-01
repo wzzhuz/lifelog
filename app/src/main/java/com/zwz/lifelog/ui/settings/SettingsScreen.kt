@@ -46,6 +46,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.zwz.lifelog.data.HomeLayoutMode
+import com.zwz.lifelog.data.HomeLayoutPrefs
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.font.FontWeight
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.data.TemplateFileParser
 import com.zwz.lifelog.data.TemplateParseResult
@@ -363,6 +367,38 @@ fun SettingsScreen(
                 }
             }
 
+            Spacer(Modifier.height(20.dp))
+            SectionTitle("首页布局")
+            val layoutMode by HomeLayoutPrefs.modeFlow(context)
+                .collectAsState(initial = HomeLayoutMode.COMPACT)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LayoutOption(
+                    selected = layoutMode == HomeLayoutMode.COMPACT,
+                    title = "紧凑",
+                    desc = "一屏约 8~9 个，信息精简",
+                    onClick = { scope.launch { HomeLayoutPrefs.setMode(context, HomeLayoutMode.COMPACT) } }
+                )
+                LayoutOption(
+                    selected = layoutMode == HomeLayoutMode.COMFORT,
+                    title = "舒适",
+                    desc = "一屏约 5~6 个，信息最完整",
+                    onClick = { scope.launch { HomeLayoutPrefs.setMode(context, HomeLayoutMode.COMFORT) } }
+                )
+                LayoutOption(
+                    selected = layoutMode == HomeLayoutMode.GROUPED,
+                    title = "按分类分组",
+                    desc = "吸顶分类头，可折叠",
+                    onClick = { scope.launch { HomeLayoutPrefs.setMode(context, HomeLayoutMode.GROUPED) } }
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "紧凑与舒适模式下，长按卡片可拖动排序。",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             Spacer(Modifier.height(24.dp))
             SectionTitle("回顾")
             OutlinedButton(
@@ -429,6 +465,46 @@ fun SettingsScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun LayoutOption(
+    selected: Boolean,
+    title: String,
+    desc: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        else MaterialTheme.colorScheme.surface,
+        border = if (selected) null else androidx.compose.foundation.BorderStroke(
+            1.dp, MaterialTheme.colorScheme.outlineVariant
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            androidx.compose.material3.RadioButton(
+                selected = selected,
+                onClick = onClick
+            )
+            Spacer(Modifier.width(6.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium)
+                Text(desc, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
