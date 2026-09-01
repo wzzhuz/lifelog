@@ -108,12 +108,8 @@ fun <T> DragSortLazyColumn(
                         )
                     }
             ) {
-                itemContent(
-                    item = item,
-                    index = index,
-                    isDragging = isDragging,
-                    dragHandle = {}
-                )
+                // 函数类型参数不支持命名实参，只能按位置传
+                itemContent(item, index, isDragging, {})
             }
         }
     }
