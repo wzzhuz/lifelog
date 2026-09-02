@@ -241,11 +241,18 @@ jobs:
           LOG=/tmp/nutstore.log
           : > "$LOG"
           log()  { echo "$*" | tee -a "$LOG"; }
+          # 用 DUMPED 去重 + EXIT trap：无论脚本从哪里退出（包括 python3
+          # 之类的子进程崩掉），诊断日志都会被写进 Job Summary，
+          # 不会出现「失败了但 summary 一片空白」的情况。
+          DUMPED=0
           dump() {
+            [ "$DUMPED" = "1" ] && return 0
+            DUMPED=1
             { echo "### 坚果云上传诊断"; echo '```'; cat "$LOG"; echo '```'; } \
               >> "$GITHUB_STEP_SUMMARY"
           }
-          fail() { log "❌ $*"; dump; exit 1; }
+          trap dump EXIT
+          fail() { log "❌ $*"; exit 1; }
 
           APK_PATH="app/build/outputs/apk/release/$APK_NAME"
 
@@ -259,8 +266,11 @@ jobs:
           fi
 
           DIR="${FOLDER:-lifelog-releases}"
-          APK_ENC=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["APK_NAME"]))')
-          DIR_ENC=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["DIR"]))')
+          # 用命令行参数传值，不要读 os.environ：DIR 是普通 shell 变量（未 export），
+          # 子进程 python3 看不到，会抛 KeyError: 'DIR'。
+          urlenc() { python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+          APK_ENC=$(urlenc "$APK_NAME")
+          DIR_ENC=$(urlenc "$DIR")
 
           ROOT="https://dav.jianguoyun.com/dav"
           BASE="$ROOT/$DIR_ENC"
