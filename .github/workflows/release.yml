@@ -126,7 +126,10 @@ jobs:
         id: rename
         run: |
           cd app/build/outputs/apk/release
-          APK="生活手记-v${{ steps.ver.outputs.version }}.apk"
+          # 文件名统一用 ASCII：实测中文与 ${{ }} 表达式写在同一字符串里时，
+          # GitHub Actions 会把中文字符吃掉（v1.0.0 曾产出 "-v1.0.0.apk"）。
+          # 中文标题保留在 Release 说明里，不受影响。
+          APK="lifelog-v${{ steps.ver.outputs.version }}.apk"
           mv app-release.apk "$APK"
           ls -lh
           echo "apk_name=$APK" >> $GITHUB_OUTPUT
@@ -226,7 +229,8 @@ jobs:
           APK_NAME: ${{ steps.rename.outputs.apk_name }}
           FOLDER: ${{ inputs.nutstore_folder }}
         run: |
-          set -e
+          # 注意：这里刻意不用 set -e。之前 set -e 会让 curl 一旦返回非 0
+          # 就立刻终止脚本，真实的 HTTP 状态码根本没机会打印出来。
           APK_PATH="app/build/outputs/apk/release/$APK_NAME"
 
           # 未配置 Secrets 时跳过，而不是让整个 workflow 失败
@@ -237,26 +241,66 @@ jobs:
           fi
 
           DIR="${FOLDER:-lifelog-releases}"
-
-          # 中文文件名必须 URL 编码，否则 WebDAV 会返回 400
           APK_ENC=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["APK_NAME"]))')
           DIR_ENC=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["DIR"]))')
 
-          BASE="https://dav.jianguoyun.com/dav/$DIR_ENC"
+          ROOT="https://dav.jianguoyun.com/dav"
+          BASE="$ROOT/$DIR_ENC"
+          AUTH="$JGY_USER:$JGY_APP_PASSWORD"
 
-          # 创建目录；目录已存在会返回 405，忽略即可
-          curl -s -o /dev/null -u "$JGY_USER:$JGY_APP_PASSWORD" -X MKCOL "$BASE" || true
+          echo "目标：坚果云 /$DIR/$APK_NAME"
+          echo "本地： $APK_PATH"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "❌ 本地找不到 APK，终止上传"; exit 1
+          fi
+          echo "大小： $(du -h "$APK_PATH" | cut -f1)"
+          echo ""
 
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                   --retry 3 --retry-delay 10 --retry-connrefused --max-time 900 \
-                   -u "$JGY_USER:$JGY_APP_PASSWORD" \
-                   -T "$APK_PATH" "$BASE/$APK_ENC")
-
-          if [ "$CODE" != "201" ] && [ "$CODE" != "204" ]; then
-            echo "❌ 坚果云上传失败（HTTP $CODE）"
-            echo "   常见原因：应用密码填错 / 当月上传流量已用尽 / 文件名含特殊字符"
+          # ---- 第 1 步：认证连通性测试（只读，不消耗流量）----
+          echo "【1/3】测试账号认证（PROPFIND /dav/）"
+          C1=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 \
+                 -u "$AUTH" -X PROPFIND -H "Depth: 0" "$ROOT/")
+          echo "      → HTTP $C1"
+          if [ "$C1" = "401" ] || [ "$C1" = "403" ]; then
+            echo "❌ 认证失败。请确认 JGY_APP_PASSWORD 填的是『应用密码』（安全选项→第三方应用管理里生成的那串），"
+            echo "   不是坚果云登录密码——自 2023 年起登录密码已被 WebDAV 拒绝。"
+            exit 1
+          elif [ "$C1" = "000" ]; then
+            echo "❌ 连不上坚果云（网络层失败）。可能是跨境链路超时或 runner 出口被拦，稍后重试。"
             exit 1
           fi
+
+          # ---- 第 2 步：确保目录存在 ----
+          echo "【2/3】确保目录 /$DIR 存在"
+          C2=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 \
+                 -u "$AUTH" -X MKCOL "$BASE")
+          echo "      → HTTP $C2（201=新建  405=已存在  409=父目录异常）"
+          if [ "$C2" != "201" ] && [ "$C2" != "405" ]; then
+            echo "❌ 目录创建失败（HTTP $C2）。可先在坚果云网页端手动建一个名为 $DIR 的文件夹再重试。"
+            exit 1
+          fi
+
+          # ---- 第 3 步：上传 APK ----
+          echo "【3/3】上传 APK（跨境传输，可能需要几分钟）"
+          OUT=$(curl -s -w '\n__CODE__%{http_code}' \
+                  --retry 2 --retry-delay 15 --retry-connrefused --max-time 900 \
+                  -u "$AUTH" -T "$APK_PATH" "$BASE/$APK_ENC" 2>&1)
+          CODE=$(printf '%s' "$OUT" | sed -n 's/.*__CODE__//p' | tail -1)
+          BODY=$(printf '%s' "$OUT" | sed 's/__CODE__.*//')
+          echo "      → HTTP $CODE"
+          [ -n "$BODY" ] && echo "      响应体：$BODY"
+
+          if [ "$CODE" != "201" ] && [ "$CODE" != "204" ]; then
+            echo "❌ 上传失败（HTTP $CODE）。对照："
+            echo "   401/403 认证或权限被拒；404/409 父目录不存在；"
+            echo "   507 空间不足；000 网络中断/超时（curl 报错见上方响应体）"
+            exit 1
+          fi
+
+          # ---- 校验：确认文件真的落盘 ----
+          CHECK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 \
+                    -u "$AUTH" -I "$BASE/$APK_ENC")
+          echo "校验 HEAD → HTTP $CHECK"
 
           echo "✅ 已上传 → 坚果云 /$DIR/$APK_NAME"
           echo "skipped=false" >> $GITHUB_OUTPUT
