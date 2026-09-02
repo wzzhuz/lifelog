@@ -30,6 +30,16 @@ on:
         required: false
         type: boolean
         default: false
+      upload_nutstore:
+        description: '上传到坚果云（免费版每月 1GB 上传流量，反复调试时建议关掉）'
+        required: false
+        type: boolean
+        default: true
+      nutstore_folder:
+        description: '坚果云内的目标文件夹名（只能含英文/数字，留空用 lifelog-releases）'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: release-${{ github.ref }}
@@ -193,6 +203,65 @@ jobs:
             || gh release edit "$TAG" --notes-file /tmp/notes.md \
                && gh release upload "$TAG" "$APK" --clobber
 
+      # ---------------------------------------------------------------
+      # 上传到坚果云（WebDAV）
+      #
+      # 前置配置：
+      #   1. 坚果云网页端 → 账户信息 → 安全选项 → 第三方应用管理
+      #      → 添加应用密码（注意是「应用密码」，不是登录密码）
+      #   2. 本仓库 Settings → Secrets and variables → Actions 添加：
+      #      JGY_USER          —— 坚果云账号（一般是注册邮箱）
+      #      JGY_APP_PASSWORD  —— 上一步生成的应用密码
+      #
+      # 免费版配额：每月上传 1GB / 下载 3GB，单文件上限 500MB。
+      # 本项目 APK 约 20MB，每月可上传约 50 次，自用完全够。
+      # 注意：流量清零按账号注册时间滚动，不是每月 1 号。
+      # ---------------------------------------------------------------
+      - name: 上传到坚果云
+        id: nutstore
+        if: inputs.create_release && inputs.upload_nutstore
+        env:
+          JGY_USER: ${{ secrets.JGY_USER }}
+          JGY_APP_PASSWORD: ${{ secrets.JGY_APP_PASSWORD }}
+          APK_NAME: ${{ steps.rename.outputs.apk_name }}
+          FOLDER: ${{ inputs.nutstore_folder }}
+        run: |
+          set -e
+          APK_PATH="app/build/outputs/apk/release/$APK_NAME"
+
+          # 未配置 Secrets 时跳过，而不是让整个 workflow 失败
+          if [ -z "$JGY_USER" ] || [ -z "$JGY_APP_PASSWORD" ]; then
+            echo "⚠️  未配置 JGY_USER / JGY_APP_PASSWORD，跳过坚果云上传"
+            echo "skipped=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          DIR="${FOLDER:-lifelog-releases}"
+
+          # 中文文件名必须 URL 编码，否则 WebDAV 会返回 400
+          APK_ENC=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["APK_NAME"]))')
+          DIR_ENC=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["DIR"]))')
+
+          BASE="https://dav.jianguoyun.com/dav/$DIR_ENC"
+
+          # 创建目录；目录已存在会返回 405，忽略即可
+          curl -s -o /dev/null -u "$JGY_USER:$JGY_APP_PASSWORD" -X MKCOL "$BASE" || true
+
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                   --retry 3 --retry-delay 10 --retry-connrefused --max-time 900 \
+                   -u "$JGY_USER:$JGY_APP_PASSWORD" \
+                   -T "$APK_PATH" "$BASE/$APK_ENC")
+
+          if [ "$CODE" != "201" ] && [ "$CODE" != "204" ]; then
+            echo "❌ 坚果云上传失败（HTTP $CODE）"
+            echo "   常见原因：应用密码填错 / 当月上传流量已用尽 / 文件名含特殊字符"
+            exit 1
+          fi
+
+          echo "✅ 已上传 → 坚果云 /$DIR/$APK_NAME"
+          echo "skipped=false" >> $GITHUB_OUTPUT
+          echo "path=/$DIR/$APK_NAME" >> $GITHUB_OUTPUT
+
       - name: 输出摘要
         run: |
           echo "### Release 编译完成" >> $GITHUB_STEP_SUMMARY
@@ -207,3 +276,9 @@ jobs:
           else
             echo "未勾选发布，产物在下方 **Artifacts** 区域下载。" >> $GITHUB_STEP_SUMMARY
           fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          case "${{ steps.nutstore.outputs.skipped }}" in
+            true)  echo "☁️ 坚果云：已跳过（未配置 JGY_USER / JGY_APP_PASSWORD）" >> $GITHUB_STEP_SUMMARY ;;
+            false) echo "☁️ 坚果云：已上传至 \`${{ steps.nutstore.outputs.path }}\`" >> $GITHUB_STEP_SUMMARY ;;
+            *)     echo "☁️ 坚果云：未上传（未勾选或本次未发布）" >> $GITHUB_STEP_SUMMARY ;;
+          esac
