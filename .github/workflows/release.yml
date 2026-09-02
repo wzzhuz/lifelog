@@ -126,10 +126,12 @@ jobs:
         id: rename
         run: |
           cd app/build/outputs/apk/release
-          # 文件名统一用 ASCII：实测中文与 ${{ }} 表达式写在同一字符串里时，
-          # GitHub Actions 会把中文字符吃掉（v1.0.0 曾产出 "-v1.0.0.apk"）。
-          # 中文标题保留在 Release 说明里，不受影响。
-          APK="lifelog-v${{ steps.ver.outputs.version }}.apk"
+          # 中文前缀必须单独成行，不能和下面的表达式写进同一个字符串。
+          # 因为 GitHub 在解析 workflow 时会做一次全局的表达式插值替换，
+          # 中文与表达式同行会被替换过程破坏（v1.0.0 曾产出 "-v1.0.0.apk"）。
+          # 拆成两段拼接即可保留中文。
+          NAME_PREFIX="生活手记"
+          APK="${NAME_PREFIX}-v${{ steps.ver.outputs.version }}.apk"
           mv app-release.apk "$APK"
           ls -lh
           echo "apk_name=$APK" >> $GITHUB_OUTPUT
@@ -141,10 +143,13 @@ jobs:
           keytool -printcert -jarfile "app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}" 2>/dev/null \
             || jarsigner -verify -verbose -certs "app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}" | head -20
 
+      # 注意：artifact 名里的中文不能直接和表达式写在同一行，否则会被表达式
+      # 替换过程破坏。这里统一改用上一步输出的 apk_name（中文来自运行时变量值，
+      # 不参与 YAML 层的插值），顺带保证 artifact 名与文件名一致。
       - name: 上传 Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: 生活手记-release-${{ steps.ver.outputs.version }}
+          name: ${{ steps.rename.outputs.apk_name }}
           path: app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}
           retention-days: 365
           if-no-files-found: error
@@ -153,7 +158,7 @@ jobs:
         if: inputs.build_aab
         uses: actions/upload-artifact@v4
         with:
-          name: 生活手记-aab-${{ steps.ver.outputs.version }}
+          name: lifelog-aab-${{ steps.ver.outputs.version }}
           path: app/build/outputs/bundle/release/app-release.aab
           retention-days: 365
           if-no-files-found: error
