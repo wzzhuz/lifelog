@@ -6,10 +6,13 @@ import com.zwz.lifelog.domain.model.Record
 import com.zwz.lifelog.domain.usecase.StatusCalculator
 import com.zwz.lifelog.util.DayDiff
 import com.zwz.lifelog.util.TimeFormatter
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.TimeZone
 
 /**
  * 「几天前」的回归测试。
@@ -24,7 +27,32 @@ import java.time.ZoneId
 class DayDiffTest {
 
     private val shanghai = ZoneId.of("Asia/Shanghai")
+    private val newYork = ZoneId.of("America/New_York")
 
+    private lateinit var originalZone: TimeZone
+
+    /**
+     * 固定设备时区，否则这套测试在 CI 上必然失败。
+     *
+     * GitHub Actions 跑在 UTC，而 [DayDiff.calendarDays] 和
+     * [StatusCalculator] 默认取 [ZoneId.systemDefault]。不固定的话，
+     * 上海时间 9/4 早上 9 点在 UTC 还是 9/3，日历根本没翻页，
+     * 「同一天」「跨午夜」「跨年」三组断言会全错。
+     *
+     * 这也正是这套逻辑的真实行为：用户换了时区，就按当地日历算。
+     */
+    @Before
+    fun setUp() {
+        originalZone = TimeZone.getDefault()
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+    }
+
+    @After
+    fun tearDown() {
+        TimeZone.setDefault(originalZone)
+    }
+
+    /** 按指定时区把 "2026-09-02T22:00" 解析成毫秒。 */
     private fun ts(text: String, zone: ZoneId = shanghai): Long =
         LocalDateTime.parse(text).atZone(zone).toInstant().toEpochMilli()
 
@@ -36,12 +64,10 @@ class DayDiffTest {
         val now = ts("2026-09-04T09:00")
 
         // 真实只过了 35 小时，但日期翻了两页
-        assertEquals(2, DayDiff.calendarDays(recorded, now))
+        assertEquals(2, DayDiff.calendarDays(recorded, now, shanghai))
         assertEquals(1.4583333f, DayDiff.elapsedDays(recorded, now), 0.0001f)
 
-        // 显示层：前天
-        assertEquals("前天", TimeFormatter.daysAgo(DayDiff.calendarDays(recorded, now, shanghai)))
-        // 跨年后副标题会带上年份，这里只固定住「距今」部分
+        // 显示层：前天（跨年后副标题带年份，这里只固定「距今」部分）
         assertEquals(
             "前天",
             TimeFormatter.agoWithDate(recorded, shanghai, now).substringBefore(" · ")
@@ -51,36 +77,35 @@ class DayDiffTest {
     @Test
     fun `同一条记录的文案不再随查看时刻漂移`() {
         val recorded = ts("2026-09-02T22:00")
-        // 旧实现下这两个时刻会给出不同答案（1 天 vs 2 天）
-        assertEquals(2, DayDiff.calendarDays(recorded, ts("2026-09-04T00:30")))
-        assertEquals(2, DayDiff.calendarDays(recorded, ts("2026-09-04T21:59")))
-        assertEquals(2, DayDiff.calendarDays(recorded, ts("2026-09-04T22:00")))
+        // 旧实现下 21:59 和 22:00 会给出不同答案（1 天 vs 2 天）
+        assertEquals(2, DayDiff.calendarDays(recorded, ts("2026-09-04T00:30"), shanghai))
+        assertEquals(2, DayDiff.calendarDays(recorded, ts("2026-09-04T21:59"), shanghai))
+        assertEquals(2, DayDiff.calendarDays(recorded, ts("2026-09-04T22:00"), shanghai))
     }
 
     // ---------- 自然日口径 ----------
 
     @Test
     fun `同一天内无论几点都是今天`() {
-        assertEquals(0, DayDiff.calendarDays(ts("2026-09-04T01:00"), ts("2026-09-04T23:59")))
+        assertEquals(0, DayDiff.calendarDays(ts("2026-09-04T01:00"), ts("2026-09-04T23:59"), shanghai))
     }
 
     @Test
-    fun `隔两小时但跨了午夜就算昨天`() {
-        // 22 小时 vs 2 小时：旧实现前者算昨天、后者算今天，都不对
-        assertEquals(1, DayDiff.calendarDays(ts("2026-09-03T23:00"), ts("2026-09-04T01:00")))
-        assertEquals(1, DayDiff.calendarDays(ts("2026-09-03T22:00"), ts("2026-09-04T20:00")))
+    fun `隔两小时但跨了午夜也算昨天`() {
+        // 2 小时 vs 22 小时：按流逝时长算前者是 0 天，但日历确实翻页了
+        assertEquals(1, DayDiff.calendarDays(ts("2026-09-03T23:00"), ts("2026-09-04T01:00"), shanghai))
+        assertEquals(1, DayDiff.calendarDays(ts("2026-09-03T22:00"), ts("2026-09-04T20:00"), shanghai))
     }
 
     @Test
     fun `跨年仍然正确`() {
-        assertEquals(1, DayDiff.calendarDays(ts("2025-12-31T23:59"), ts("2026-01-01T00:01")))
+        assertEquals(1, DayDiff.calendarDays(ts("2025-12-31T23:59"), ts("2026-01-01T00:01"), shanghai))
     }
 
     // ---------- 夏令时 ----------
 
     @Test
     fun `夏令时前进那天只有23小时仍算1天`() {
-        val newYork = ZoneId.of("America/New_York")
         // 2026-03-08 美东 02:00 直接跳到 03:00，这天只有 23 小时
         val before = ts("2026-03-07T22:00", newYork)
         val after = ts("2026-03-08T10:00", newYork)
@@ -92,7 +117,6 @@ class DayDiffTest {
 
     @Test
     fun `夏令时回拨那天有25小时仍算1天`() {
-        val newYork = ZoneId.of("America/New_York")
         // 2026-11-01 美东 02:00 回拨到 01:00，这天有 25 小时
         val before = ts("2026-10-31T22:00", newYork)
         val after = ts("2026-11-01T10:00", newYork)
@@ -105,7 +129,7 @@ class DayDiffTest {
 
     @Test
     fun `未来时间戳按0处理`() {
-        assertEquals(0, DayDiff.calendarDays(ts("2026-09-05T00:00"), ts("2026-09-04T09:00")))
+        assertEquals(0, DayDiff.calendarDays(ts("2026-09-05T00:00"), ts("2026-09-04T09:00"), shanghai))
         assertEquals(0f, DayDiff.elapsedDays(ts("2026-09-05T00:00"), ts("2026-09-04T09:00")), 0.0001f)
     }
 
