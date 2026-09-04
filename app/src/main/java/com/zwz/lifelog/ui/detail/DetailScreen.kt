@@ -176,7 +176,7 @@ fun DetailScreen(
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    s.daysSince?.toString() ?: "—",
+                                    s.daysAgo?.toString() ?: "—",
                                     style = MaterialTheme.typography.headlineLarge
                                 )
                                 Text("天前", style = MaterialTheme.typography.labelMedium,

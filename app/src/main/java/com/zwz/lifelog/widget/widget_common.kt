@@ -44,8 +44,14 @@ internal fun freshnessColor(f: Freshness): ColorProvider = when (f) {
     Freshness.NONE -> ColorProvider(Color(0xFF9CA3AF))
 }
 
+/**
+ * 小组件上的「距今天数」文案。
+ *
+ * 用 [EventStatusLite.daysAgo]（自然日）而非流逝整天数：
+ * 早上 9 点看昨晚 10 点记的事，按自然日才算「昨天」。
+ */
 internal fun daysText(s: EventStatusLite): String = when {
-    s.daysSince == null -> "未记"
-    s.daysSince == 0 -> "今天"
-    else -> "${s.daysSince} 天"
+    s.daysAgo == null -> "未记"
+    s.daysAgo == 0 -> "今天"
+    else -> "${s.daysAgo} 天"
 }

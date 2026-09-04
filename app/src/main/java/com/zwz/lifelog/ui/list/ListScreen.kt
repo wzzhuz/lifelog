@@ -176,7 +176,7 @@ fun ListScreen(
                                 Text(s.event.name, style = MaterialTheme.typography.bodyMedium)
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    if (s.daysSince == null) "未记" else "${s.daysSince}天",
+                                    if (s.daysAgo == null) "未记" else "${s.daysAgo}天",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

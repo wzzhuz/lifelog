@@ -79,7 +79,7 @@ class SingleWidget : GlanceAppWidget() {
                     )
                     Spacer(GlanceModifier.height(4.dp))
                     Text(
-                        s.daysSince?.toString() ?: "—",
+                        s.daysAgo?.toString() ?: "—",
                         style = TextStyle(
                             fontSize = 30.sp,
                             fontWeight = FontWeight.Bold,
@@ -87,7 +87,7 @@ class SingleWidget : GlanceAppWidget() {
                         )
                     )
                     Text(
-                        if (s.daysSince == null) "待记录" else "天前 · 点击记录",
+                        if (s.daysAgo == null) "待记录" else "天前 · 点击记录",
                         style = TextStyle(fontSize = 10.sp)
                     )
                 }

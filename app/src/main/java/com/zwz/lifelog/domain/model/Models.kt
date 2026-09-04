@@ -58,10 +58,20 @@ data class EventStatus(
      */
     val recordCount: Int = records.size,
     val lastTimestamp: Long?,
-    val daysSince: Int?,
+    /**
+     * 距上次记录跨了几个**自然日**：今天=0，昨天=1，前天=2。
+     *
+     * 只用于界面显示（「X 天前」「昨天」这类文案）。
+     * 算新鲜度请看 [ratio] —— 那是按真实流逝时长算的，两者语义不同，别混用。
+     */
+    val daysAgo: Int?,
     val avgGapMillis: Long?,
     val baselineDays: Int,
     val freshness: Freshness,
+    /**
+     * 已流逝时长 ÷ 基准间隔，含小数（如 35 小时 / 2 天 = 0.73）。
+     * 决定 FRESH / SOON / DUE 与进度条。
+     */
     val ratio: Float,
     val predictedNextMillis: Long?
 )
@@ -80,10 +90,15 @@ data class EventStatusLite(
     val event: Event,
     val recordCount: Int,
     val lastTimestamp: Long?,
-    val daysSince: Int?,
+    /**
+     * 距上次记录跨了几个**自然日**：今天=0，昨天=1，前天=2。仅用于显示。
+     * 新鲜度判断请用 [ratio]，详见 [EventStatus.daysAgo]。
+     */
+    val daysAgo: Int?,
     val avgGapMillis: Long?,
     val baselineDays: Int,
     val freshness: Freshness,
+    /** 已流逝时长 ÷ 基准间隔，含小数。详见 [EventStatus.ratio]。 */
     val ratio: Float,
     val predictedNextMillis: Long?
 )
