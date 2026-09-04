@@ -5,6 +5,7 @@ import com.zwz.lifelog.domain.model.EventStatus
 import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Freshness
 import com.zwz.lifelog.domain.model.Record
+import com.zwz.lifelog.util.DayDiff
 import kotlin.math.roundToInt
 
 /**
@@ -13,17 +14,16 @@ import kotlin.math.roundToInt
  * 设计要点：没有设置期望间隔的事件（例如「看病」这种没有规律的事），
  * 在记录满两次之后会自动使用历史平均间隔作为判断基准。
  * 这是相比「只显示距今天数」的关键增强：能直接回答「现在该不该做」。
+ *
+ * ⚠️ 两个「天」的口径是分开的，不要合并：
+ * - `daysAgo` 走 [DayDiff.calendarDays]，按自然日，只喂给显示层；
+ * - `ratio` 走 [DayDiff.elapsedDays]，按真实流逝时长（含小数），只喂给状态判断。
+ * 合并回一个值就会重现「9/2 22:00 的事在 9/4 显示成昨天」。
  */
 object StatusCalculator {
 
     private const val DAY_MILLIS = 86_400_000L
     private const val DEFAULT_BASELINE_DAYS = 30
-
-    fun daysSince(timestamp: Long, now: Long = System.currentTimeMillis()): Int {
-        val diff = now - timestamp
-        if (diff <= 0L) return 0
-        return (diff / DAY_MILLIS).toInt()
-    }
 
     /** 相邻两次记录的平均间隔（毫秒）。记录不足两条时返回 null。 */
     fun averageGapMillis(recordsAsc: List<Record>): Long? {
@@ -68,7 +68,7 @@ object StatusCalculator {
                 event = event,
                 recordCount = 0,
                 lastTimestamp = null,
-                daysSince = null,
+                daysAgo = null,
                 avgGapMillis = null,
                 baselineDays = safeBaseline.roundToInt(),
                 freshness = Freshness.NONE,
@@ -77,8 +77,9 @@ object StatusCalculator {
             )
         }
 
-        val d: Int = daysSince(lastAsc, now)
-        val ratio: Float = d.toFloat() / safeBaseline
+        // 显示用自然日，判断用真实流逝时长——两者口径不同，不要合并
+        val daysAgo: Int = DayDiff.calendarDays(lastAsc, now)
+        val ratio: Float = DayDiff.elapsedDays(lastAsc, now) / safeBaseline
         val freshness: Freshness = when {
             ratio >= 1f -> Freshness.DUE
             ratio >= 0.75f -> Freshness.SOON
@@ -89,7 +90,7 @@ object StatusCalculator {
             event = event,
             recordCount = count,
             lastTimestamp = lastAsc,
-            daysSince = d,
+            daysAgo = daysAgo,
             avgGapMillis = avg,
             baselineDays = safeBaseline.roundToInt(),
             freshness = freshness,
@@ -128,7 +129,7 @@ object StatusCalculator {
                 records = emptyList(),
                 recordCount = 0,
                 lastTimestamp = null,
-                daysSince = null,
+                daysAgo = null,
                 avgGapMillis = null,
                 baselineDays = event.targetDays ?: DEFAULT_BASELINE_DAYS,
                 freshness = Freshness.NONE,
@@ -137,14 +138,15 @@ object StatusCalculator {
             )
         }
 
-        val d: Int = daysSince(lastAsc, now)
         val baselineDays: Float = when {
             event.targetDays != null && event.targetDays > 0 -> event.targetDays.toFloat()
             avg != null && avg > 0L -> avg.toFloat() / DAY_MILLIS.toFloat()
             else -> DEFAULT_BASELINE_DAYS.toFloat()
         }
         val safeBaseline: Float = if (baselineDays < 1f) 1f else baselineDays
-        val ratio: Float = d.toFloat() / safeBaseline
+        // 显示用自然日，判断用真实流逝时长——两者口径不同，不要合并
+        val daysAgo: Int = DayDiff.calendarDays(lastAsc, now)
+        val ratio: Float = DayDiff.elapsedDays(lastAsc, now) / safeBaseline
         val freshness: Freshness = when {
             ratio >= 1f -> Freshness.DUE
             ratio >= 0.75f -> Freshness.SOON
@@ -156,7 +158,7 @@ object StatusCalculator {
             records = recordsDesc,
             recordCount = count,
             lastTimestamp = lastAsc,
-            daysSince = d,
+            daysAgo = daysAgo,
             avgGapMillis = avg,
             baselineDays = safeBaseline.roundToInt(),
             freshness = freshness,
@@ -178,7 +180,7 @@ object StatusCalculator {
                 event = event,
                 records = recordsAsc,
                 lastTimestamp = null,
-                daysSince = null,
+                daysAgo = null,
                 avgGapMillis = null,
                 baselineDays = event.targetDays ?: DEFAULT_BASELINE_DAYS,
                 freshness = Freshness.NONE,
@@ -186,8 +188,6 @@ object StatusCalculator {
                 predictedNextMillis = null
             )
         }
-
-        val d: Int = daysSince(last, now)
 
         // 基准天数：优先用用户设定；其次用历史平均；都没有则兜底 30 天
         val baselineDays: Float = when {
@@ -197,7 +197,9 @@ object StatusCalculator {
         }
         val safeBaseline: Float = if (baselineDays < 1f) 1f else baselineDays
 
-        val ratio: Float = d.toFloat() / safeBaseline
+        // 显示用自然日，判断用真实流逝时长——两者口径不同，不要合并
+        val daysAgo: Int = DayDiff.calendarDays(last, now)
+        val ratio: Float = DayDiff.elapsedDays(last, now) / safeBaseline
 
         val freshness: Freshness = if (ratio >= 1f) {
             Freshness.DUE
@@ -213,7 +215,7 @@ object StatusCalculator {
             event = event,
             records = recordsAsc,
             lastTimestamp = last,
-            daysSince = d,
+            daysAgo = daysAgo,
             avgGapMillis = avg,
             baselineDays = safeBaseline.roundToInt(),
             freshness = freshness,
