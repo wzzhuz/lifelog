@@ -51,6 +51,21 @@ jobs:
           test -f app/debug.keystore && echo "debug.keystore 已就绪" \
             || (echo "缺少 app/debug.keystore" && exit 1)
 
+      # 关键：assembleDebug 只编译主源码，**不会碰 src/test**，
+      # 所以单测里写错了也照样「编译通过」。必须单独跑一次 test，
+      # 否则测试文件形同虚设（曾经就漏了这一步）。
+      - name: 运行单元测试
+        run: gradle testDebugUnitTest --stacktrace --no-daemon
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 单元测试报告
+          path: app/build/reports/tests/testDebugUnitTest
+          retention-days: 30
+          if-no-files-found: warn
+
       - name: 编译 Debug APK
         run: gradle assembleDebug --stacktrace --no-daemon
 
