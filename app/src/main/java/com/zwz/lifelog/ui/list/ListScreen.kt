@@ -70,6 +70,9 @@ import com.zwz.lifelog.data.HomeLayoutMode
 import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.ui.component.CardDensity
 import com.zwz.lifelog.ui.component.DragSortLazyColumn
+import com.zwz.lifelog.util.TimeFormatter
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,6 +88,9 @@ fun ListScreen(
     onToggleCollapse: (String) -> Unit = {}
 ) {
     val state by vm.ui.collectAsState()
+    // 整屏共用一个「现在」：卡片副标题的「8 小时前」由它驱动，
+    // 不读它的话文案会停在页面打开那一刻，过一小时也不动。
+    val now by vm.now.collectAsState()
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     LaunchedEffect(layoutMode) { vm.onLayoutMode(layoutMode) }
@@ -176,7 +182,13 @@ fun ListScreen(
                                 Text(s.event.name, style = MaterialTheme.typography.bodyMedium)
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    if (s.daysAgo == null) "未记" else "${s.daysAgo}天",
+                                    // 「0天」没有信息量，按距今粒度自适应：
+                                    // 吃药这类几小时一次的事件会显示「8小时」
+                                    if (s.lastTimestamp == null) {
+                                        "未记"
+                                    } else {
+                                        TimeFormatter.agoCompact(s.lastTimestamp, now)
+                                    },
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -222,6 +234,7 @@ fun ListScreen(
                     visible = state.visible,
                     collapsed = collapsedTags,
                     density = density,
+                    now = now,
                     onToggleCollapse = { onToggleCollapse(it) },
                     onSaveOrder = { ids -> vm.saveGroupOrder(ids) },
                     onOpenDetail = onOpenDetail,
@@ -241,15 +254,20 @@ fun ListScreen(
                 // 拖拽过程中每移动一格都写库会造成大量无谓 IO。
                 val ordered: androidx.compose.runtime.snapshots.SnapshotStateList<EventStatusLite> =
                     remember { mutableStateListOf<EventStatusLite>() }
-                // 正在保存时不要同步：保存会触发 Flow 发射，
-                // 若此时用数据库回传的（可能滞后的）顺序覆盖本地，
-                // 刚拖好的顺序会被冲掉。
+                // 手指还没松手：完全冻结同步，否则列表会在手指底下重排。
+                var dragging by remember { mutableStateOf(false) }
+                // 松手到「数据库顺序追上本地」之间同样冻结，理由见 onDragEnd。
                 var saving by remember { mutableStateOf(false) }
 
-                LaunchedEffect(state.visible, saving) {
-                    if (saving) return@LaunchedEffect
-                    val want: List<Long> = state.visible.map { it.event.id }
-                    if (ordered.map { it.event.id } != want) {
+                LaunchedEffect(state.visible, dragging, saving) {
+                    if (dragging || saving) return@LaunchedEffect
+                    // 必须比较**内容**，不能只比 id 顺序。
+                    //
+                    // 只比 id 时，记完一笔若排序恰好没变（事件被钉选、
+                    // 或列表里就这一个事件），就会被判成「无需同步」，
+                    // 卡片上仍是旧的「上次 3 天前」——非得进详情页
+                    // 再回来（此时 remember 重建、列表为空）才会刷新。
+                    if (ordered.toList() != state.visible) {
                         ordered.clear()
                         ordered.addAll(state.visible)
                     }
@@ -259,15 +277,35 @@ fun ListScreen(
                     items = ordered,
                     keyOf = { it.event.id },
                     onReorder = { from, to ->
+                        dragging = true
                         if (from in ordered.indices && to in ordered.indices) {
                             val moved = ordered.removeAt(from)
                             ordered.add(to, moved)
                         }
                     },
                     onDragEnd = {
-                        saving = true
-                        vm.saveOrder(ordered.map { it.event.id })
-                        saving = false
+                        val ids = ordered.map { it.event.id }
+                        scope.launch {
+                            saving = true
+                            try {
+                                vm.saveOrder(ids)
+                                // 写库完成 ≠ 列表已经拿到新顺序：Room 的失效通知
+                                // 是异步的，此刻 Flow 里很可能还是旧顺序，立刻
+                                // 恢复同步会把刚拖好的列表打回去再跳回来。
+                                // 等到数据库顺序追上本地；万一因为筛选或排序
+                                // 规则永远对不上，1 秒后兜底放行，
+                                // 避免列表从此不再更新。
+                                withTimeoutOrNull(1000) {
+                                    while (vm.ui.value.visible.map { it.event.id } != ids) {
+                                        delay(50)
+                                    }
+                                }
+                            } finally {
+                                // 保存失败也要解冻，否则列表会永久停止同步
+                                saving = false
+                                dragging = false
+                            }
+                        }
                     },
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(
@@ -277,6 +315,7 @@ fun ListScreen(
                     EventCard(
                         status = s,
                         density = density,
+                        now = now,
                         onClick = { onOpenDetail(s.event.id) },
                         onQuickRecord = {
                             vm.quickRecord(s.event.id) { name ->
@@ -442,10 +481,13 @@ private fun GroupedList(
     visible: List<EventStatusLite>,
     collapsed: Set<String>,
     density: CardDensity,
+    /** 渲染「距今」文案的时刻，由调用方统一提供。 */
+    now: Long,
     onToggleCollapse: (String) -> Unit,
     onOpenDetail: (Long) -> Unit,
     onQuickRecord: (Long) -> Unit,
-    onSaveOrder: (List<Long>) -> Unit
+    /** 挂起版：调用方要等它返回才能解除「拖拽优先」的冻结。 */
+    onSaveOrder: suspend (List<Long>) -> Unit
 ) {
     val groups = remember(visible) {
         visible
@@ -475,10 +517,15 @@ private fun GroupedList(
     }
 
     val rows = remember { mutableStateListOf<GroupRow>() }
+    var dragging by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(flat, saving) {
-        if (saving) return@LaunchedEffect
+    LaunchedEffect(flat, dragging, saving) {
+        if (dragging || saving) return@LaunchedEffect
+        // 比较内容而非结构：记完一笔后分组和顺序往往都没变，
+        // 只有 EventStatusLite 里的「上次 8 小时前」变了，
+        // 只比结构会把这次更新判成「无需同步」。
         if (rows.toList() != flat) {
             rows.clear()
             rows.addAll(flat)
@@ -496,18 +543,29 @@ private fun GroupedList(
         // 关键：不允许跨组（组号必须相同），也不允许拖到第 0 个之前
         canMove = { from, to -> groupIndexOf.getOrNull(from) == groupIndexOf.getOrNull(to) },
         onReorder = { from, to ->
+            dragging = true
             if (from in rows.indices && to in rows.indices) {
                 val moved = rows.removeAt(from)
                 rows.add(to, moved)
             }
         },
         onDragEnd = {
-            saving = true
-            // 只提交所有 Item 的当前顺序。
-            // saveGroupOrder 会用组内下标重新编号 sortInGroup，
-            // 分组之间本来就按标签名排序，不需要跨组编号。
-            onSaveOrder(rows.filterIsInstance<GroupRow.Item>().map { it.status.event.id })
-            saving = false
+            scope.launch {
+                saving = true
+                try {
+                    // 只提交所有 Item 的当前顺序。
+                    // saveGroupOrder 会用组内下标重新编号 sortInGroup，
+                    // 分组之间本来就按标签名排序，不需要跨组编号。
+                    onSaveOrder(rows.filterIsInstance<GroupRow.Item>().map { it.status.event.id })
+                    // 等 Room 的失效通知回传，否则会先闪回旧顺序再跳到
+                    // 新顺序。分组模式下各组按标签名排序，不方便直接
+                    // 用 id 顺序比对，这里给一个短延时即可。
+                    delay(150)
+                } finally {
+                    saving = false
+                    dragging = false
+                }
+            }
         },
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -522,6 +580,7 @@ private fun GroupedList(
             is GroupRow.Item -> EventCard(
                 status = row.status,
                 density = density,
+                now = now,
                 onClick = { onOpenDetail(row.status.event.id) },
                 onQuickRecord = { onQuickRecord(row.status.event.id) }
             )

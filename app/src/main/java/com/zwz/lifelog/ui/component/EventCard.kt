@@ -48,7 +48,15 @@ fun EventCard(
     onClick: () -> Unit,
     onQuickRecord: () -> Unit,
     modifier: Modifier = Modifier,
-    density: CardDensity = CardDensity.COMPACT
+    density: CardDensity = CardDensity.COMPACT,
+    /**
+     * 渲染「距今」文案的时刻。
+     *
+     * 副标题是**渲染时**算出来的，而列表只在数据库变化时才发射新值。
+     * 不传这个的话，App 停在首页不动，「8 小时前」会一直停在打开那一刻。
+     * 由 ListViewModel 的分钟级 tick 提供，整屏共用一个值。
+     */
+    now: Long = System.currentTimeMillis()
 ) {
     val barColor by animateColorAsState(
         targetValue = freshnessColor(status.freshness),
@@ -59,6 +67,7 @@ fun EventCard(
         CompactCard(
             status = status,
             barColor = barColor,
+            now = now,
             onClick = onClick,
             onQuickRecord = onQuickRecord,
             modifier = modifier
@@ -67,6 +76,7 @@ fun EventCard(
         ComfortCard(
             status = status,
             barColor = barColor,
+            now = now,
             onClick = onClick,
             onQuickRecord = onQuickRecord,
             modifier = modifier
@@ -84,6 +94,7 @@ fun EventCard(
 private fun CompactCard(
     status: EventStatusLite,
     barColor: androidx.compose.ui.graphics.Color,
+    now: Long,
     onClick: () -> Unit,
     onQuickRecord: () -> Unit,
     modifier: Modifier = Modifier
@@ -129,7 +140,7 @@ private fun CompactCard(
                         }
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            subtitleOf(status),
+                            subtitleOf(status, now),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -170,6 +181,7 @@ private fun CompactCard(
 private fun ComfortCard(
     status: EventStatusLite,
     barColor: androidx.compose.ui.graphics.Color,
+    now: Long,
     onClick: () -> Unit,
     onQuickRecord: () -> Unit,
     modifier: Modifier = Modifier
@@ -209,7 +221,7 @@ private fun ComfortCard(
                 Spacer(Modifier.height(4.dp))
 
                 Text(
-                    subtitleOf(status),
+                    subtitleOf(status, now),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -265,16 +277,26 @@ private fun StatusDot(f: Freshness) {
     )
 }
 
+/**
+ * 卡片副标题。
+ *
+ * @param now 渲染时刻，来自列表页的分钟级 tick。
+ *            不传的话「8 小时前」会停在页面打开那一刻不再走动。
+ */
 @Composable
-private fun subtitleOf(s: EventStatusLite): String {
+private fun subtitleOf(s: EventStatusLite, now: Long): String {
     if (s.lastTimestamp == null) return "点击右侧 ✓ 记一笔"
+    val fmt = com.zwz.lifelog.util.TimeFormatter
     val parts = mutableListOf<String>()
-    parts.add("上次 ${com.zwz.lifelog.util.TimeFormatter.agoWithDate(s.lastTimestamp)}")
+    // 24 小时内显示小时：吃药这类间隔几小时的事件，写「今天」等于没说
+    parts.add("上次 ${fmt.agoUnit(s.lastTimestamp, now)}")
     if (s.avgGapMillis != null) {
-        parts.add("平均 ${com.zwz.lifelog.util.TimeFormatter.duration(s.avgGapMillis)}")
+        parts.add("平均 ${fmt.duration(s.avgGapMillis)}")
     }
     if (s.recordCount >= 2 && s.predictedNextMillis != null) {
-        parts.add("预计 ${com.zwz.lifelog.util.TimeFormatter.dateOnly(s.predictedNextMillis)}")
+        val next = s.predictedNextMillis
+        // 基准不足 2 天的事件（吃药、测血糖），只给日期等于没给，得带上时分
+        parts.add("预计 ${if (s.baselineDays < 2) fmt.short(next, now = now) else fmt.dateOnly(next)}")
     }
     return parts.joinToString(" · ")
 }

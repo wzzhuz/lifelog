@@ -12,6 +12,7 @@ import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.di.ServiceLocator
 import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Freshness
+import com.zwz.lifelog.util.TimeFormatter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -47,11 +48,10 @@ internal fun freshnessColor(f: Freshness): ColorProvider = when (f) {
 /**
  * 小组件上的「距今天数」文案。
  *
- * 用 [EventStatusLite.daysAgo]（自然日）而非流逝整天数：
- * 早上 9 点看昨晚 10 点记的事，按自然日才算「昨天」。
+ * 走 [TimeFormatter.agoCompact] 自适应粒度：24 小时内给小时。
+ * 吃药这类事件在桌面小组件上显示「0 天」毫无意义，
+ * 「8小时」才看得出该不该吃了。
  */
-internal fun daysText(s: EventStatusLite): String = when {
-    s.daysAgo == null -> "未记"
-    s.daysAgo == 0 -> "今天"
-    else -> "${s.daysAgo} 天"
-}
+internal fun daysText(s: EventStatusLite): String =
+    if (s.lastTimestamp == null) "未记"
+    else TimeFormatter.agoCompact(s.lastTimestamp)

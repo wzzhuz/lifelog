@@ -78,8 +78,18 @@ class SingleWidget : GlanceAppWidget() {
                         maxLines = 1
                     )
                     Spacer(GlanceModifier.height(4.dp))
+                    // 吃药这类事件的间隔是几小时，写死「天前」会一直显示 0，
+                    // 24 小时内改用小时。
+                    val last = s.lastTimestamp
+                    val hours = if (last == null) null
+                    else (System.currentTimeMillis() - last) / 3_600_000L
+                    val useHours = hours != null && hours < 24
                     Text(
-                        s.daysAgo?.toString() ?: "—",
+                        when {
+                            last == null -> "—"
+                            useHours -> "$hours"
+                            else -> "${s.daysAgo}"
+                        },
                         style = TextStyle(
                             fontSize = 30.sp,
                             fontWeight = FontWeight.Bold,
@@ -87,7 +97,11 @@ class SingleWidget : GlanceAppWidget() {
                         )
                     )
                     Text(
-                        if (s.daysAgo == null) "待记录" else "天前 · 点击记录",
+                        when {
+                            last == null -> "待记录"
+                            useHours -> "小时前 · 点击记录"
+                            else -> "天前 · 点击记录"
+                        },
                         style = TextStyle(fontSize = 10.sp)
                     )
                 }
