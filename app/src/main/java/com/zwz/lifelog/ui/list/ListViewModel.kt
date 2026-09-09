@@ -9,6 +9,8 @@ import com.zwz.lifelog.domain.model.Freshness
 import com.zwz.lifelog.domain.model.Templates
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +25,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class Filter { ALL, DUE, NONE, PINNED }
+
+/** 「距上次多久」这类文案的刷新节奏。1 分钟足够，再密只会白白唤醒 UI。 */
+private const val TICK_MS = 60_000L
 
 /**
  * 查询条件聚合。
@@ -155,6 +160,29 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /**
+     * 一分钟走一次的「现在」，供界面渲染「8 小时前」这类文案。
+     *
+     * 为什么需要它：列表数据只在**数据库变化**时才发射，
+     * 而「距上次多久」是渲染时算的。App 停在首页不动，
+     * 文案就会一直停在打开那一刻——记完一笔看着还是「3 小时前」，
+     * 过了一小时也没变化。
+     *
+     * 刻意**不**把 tick 接进 [statuses]：那会让 Room 的 Flow
+     * 每分钟被取消重启一次，白白多出几十次聚合查询。
+     * 这里只给 UI 提供一个时刻，数据查询照旧按需触发。
+     */
+    private val ticker: Flow<Long> = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(TICK_MS)
+        }
+    }
+
+    val now: StateFlow<Long> = ticker.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), System.currentTimeMillis()
+    )
+
     val ui: StateFlow<ListUiState> = combine(
         statuses, query, showTemplate, pendingUndo
     ) { statuses, q, showTpl, undo ->
@@ -189,7 +217,15 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
      * 若只给可见项编号 0..n-1，被筛掉的项会保留旧值与之冲突，
      * 一旦切回「不限」就会出现顺序错乱。
      */
-    fun saveOrder(visibleIds: List<Long>) = viewModelScope.launch {
+    /**
+     * 保存拖拽后的顺序（挂起版）。
+     *
+     * 做成挂起而不是 fire-and-forget，是为了让调用方能准确知道
+     * 「写库完成」这个时刻。UI 需要在写库期间暂停用数据库回传的
+     * 顺序覆盖本地列表，否则刚拖好的顺序会被中间态冲掉——
+     * 靠 launch 前后打标记是拦不住的，launch 会立刻返回。
+     */
+    suspend fun saveOrder(visibleIds: List<Long>) {
         val all = ui.value.all.map { it.event.id }
         val hidden = all.filter { it !in visibleIds }
         repo.saveSortOrder(visibleIds + hidden)
@@ -202,7 +238,8 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
      * 这正是本次修复的核心：此前共用一个字段，
      * 在分组里拖一下会把全局顺序重写成按标签排列。
      */
-    fun saveGroupOrder(groupIds: List<Long>) = viewModelScope.launch {
+    /** [saveOrder] 的分组版，同样是挂起版。 */
+    suspend fun saveGroupOrder(groupIds: List<Long>) {
         repo.saveGroupOrder(groupIds)
     }
 

@@ -175,12 +175,25 @@ fun DetailScreen(
                                 }
                             }
                             Column(horizontalAlignment = Alignment.End) {
+                                // 吃药这类几小时一次的事件，写死「天前」等于没说，
+                                // 24 小时内换成小时。
+                                val last = s.lastTimestamp
+                                val hours = if (last == null) null
+                                else (System.currentTimeMillis() - last) / 3_600_000L
+                                val useHours = hours != null && hours < 24
                                 Text(
-                                    s.daysAgo?.toString() ?: "—",
+                                    when {
+                                        last == null -> "—"
+                                        useHours -> "$hours"
+                                        else -> "${s.daysAgo}"
+                                    },
                                     style = MaterialTheme.typography.headlineLarge
                                 )
-                                Text("天前", style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    if (useHours) "小时前" else "天前",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
 
@@ -213,7 +226,12 @@ fun DetailScreen(
                         if (s.predictedNextMillis != null && s.recordCount >= 2) {
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                "按你的节奏，预计下次：${TimeFormatter.dateOnly(s.predictedNextMillis)}",
+                                // 基准不足 2 天的事件（吃药、测血糖）只给日期等于没给，
+                                // 得带上具体时刻才看得出「什么时候该吃下一顿」
+                                "按你的节奏，预计下次：${
+                                    if (s.baselineDays < 2) TimeFormatter.short(s.predictedNextMillis)
+                                    else TimeFormatter.dateOnly(s.predictedNextMillis)
+                                }",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
