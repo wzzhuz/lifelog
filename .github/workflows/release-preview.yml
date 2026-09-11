@@ -1,0 +1,169 @@
+name: 出体验包（Release 构建 · 不打 tag）
+
+# 与另外两个工作流的分工：
+#   build.yml          —— 每次 push 自动跑，debug 构建，日常开发验证
+#   release.yml        —— 手动触发，正式 release，**会占用版本号并打 tag**
+#   本文件             —— 手动触发，release 构建，但**不占用版本号、不打 tag、
+#                         不建 Release、不传坚果云**，只把 APK 挂在 Artifacts 里
+#
+# 存在的理由：
+#   debug 包与 release 包的体感差距很大（debug 无 R8、无 baseline profile、
+#   还带调试开销），用 debug 包判断「卡不卡」会得出错误结论。
+#   但每次为了试手感就发一个 v1.0.1 / v1.0.2 太浪费版本号，
+#   也会在 Releases 页面留下一堆临时包。
+#   这里用 commit 短 sha 命名，想出几次出几次，互不冲突。
+#
+# 触发方式：仓库 → Actions → 左侧选「出体验包（Release 构建 · 不打 tag）」
+#           → 右侧 Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '要构建的分支或 commit（留空用当前分支）'
+        required: false
+        type: string
+        default: ''
+      minify:
+        description: 'R8 混淆与资源压缩'
+        required: false
+        type: choice
+        default: 'both'
+        # 必须加引号：裸写 `on` 会被 YAML 1.1 解析成布尔 true，
+        # 与 default 的字符串类型对不上，GitHub 会**静默不注册**这个工作流
+        # （文件在仓库里、Actions 页面却找不到，也触发不了）
+        options:
+          - 'none'   # 只出不混淆的包，最安全
+          - 'on'     # 只出混淆的包
+          - 'both'   # 两个都出，可对比体积与启动速度（推荐）
+      lint:
+        description: '是否跑 lintVital（发布前建议开，临时体验可关以加速）'
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+# 不打 tag、不建 Release，因此**不需要** contents: write
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: 出体验包
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 配置 Gradle 8.13（带依赖缓存）
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      # ---------------------------------------------------------------
+      # 签名：刻意**不读** RELEASE_KEYSTORE_BASE64，固定回退 debug.keystore
+      #
+      # 这不是偷懒，是刻意的取舍：
+      # 1. 体验包要能直接覆盖手机上正在用的 debug 试用装。
+      #    两者签名不同就必须先卸载，而卸载会**清掉全部记录**——
+      #    试个手感把数据弄没了，代价太大。
+      # 2. 反正是自用临时包，不需要正式密钥的那点安全性。
+      #
+      # 代价：这类包不能对外分发（密钥是公开的）。
+      # ---------------------------------------------------------------
+      - name: 确认使用 debug 签名（保证可覆盖现有试用装）
+        run: |
+          test -f app/debug.keystore \
+            || { echo "❌ 找不到 app/debug.keystore"; exit 1; }
+          echo "✅ 使用仓库内 debug.keystore 签名"
+          echo "   与现有 debug 试用装同签名，可直接覆盖安装，不会丢数据"
+
+      - name: 取版本标识
+        id: ver
+        run: |
+          V=$(grep -m1 -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          SHA=$(git rev-parse --short=7 HEAD)
+          BR=$(echo "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '_')
+          echo "version=$V" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "branch=$BR" >> $GITHUB_OUTPUT
+          echo "版本 $V · commit $SHA · 分支 $BR"
+
+      # 不混淆的包：与 debug 构建的唯一差别就是去掉调试开销
+      - name: 编译（不混淆）
+        if: inputs.minify == 'none' || inputs.minify == 'both'
+        run: |
+          gradle assembleRelease --stacktrace --no-daemon \
+            $( [ "${{ inputs.lint }}" = "true" ] || echo "-x lintVitalRelease" )
+          mkdir -p out
+          # 文件名纯 ASCII：GitHub 资产接口不支持非 ASCII，中文会被静默丢弃
+          cp app/build/outputs/apk/release/app-release.apk \
+             "out/lifelog-preview-${{ steps.ver.outputs.sha }}-plain.apk"
+
+      # 混淆的包：体积更小、启动更快，但 Glance 依赖反射，
+      # 有小概率在桌面小组件上出问题——所以两个都出，自己对比。
+      - name: 编译（混淆）
+        if: inputs.minify == 'on' || inputs.minify == 'both'
+        run: |
+          gradle assembleRelease -PminifyRelease=true --stacktrace --no-daemon \
+            $( [ "${{ inputs.lint }}" = "true" ] || echo "-x lintVitalRelease" )
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk \
+             "out/lifelog-preview-${{ steps.ver.outputs.sha }}-minified.apk"
+
+      - name: 列出产物
+        id: list
+        run: |
+          cd out
+          ls -lh
+          echo "files=$(ls | tr '\n' ' ')" >> $GITHUB_OUTPUT
+          for f in *.apk; do
+            echo "- $f  $(du -h "$f" | cut -f1)  sha256=$(sha256sum "$f" | cut -c1-16)…"
+          done | tee /tmp/summary.md
+
+      - name: 上传体验包
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifelog-preview-${{ steps.ver.outputs.sha }}
+          path: out/*.apk
+          # 临时验证包，没必要像正式 Release 那样存一年
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 输出摘要
+        if: always()
+        run: |
+          {
+            echo "### 体验包已生成（不影响版本号）"
+            echo ""
+            echo "- 版本：${{ steps.ver.outputs.version }}"
+            echo "- 分支：\`${{ steps.ver.outputs.branch }}\`"
+            echo "- commit：\`${{ steps.ver.outputs.sha }}\`"
+            echo "- 混淆：${{ inputs.minify }}"
+            echo ""
+            cat /tmp/summary.md 2>/dev/null
+            echo ""
+            echo "**在下方 Artifacts 区域下载。**"
+            echo ""
+            echo "**与调试版的区别**"
+            echo "- 无调试开销、无即时编译负担，启动与页面切换的体感才接近真实"
+            echo "- 会跑 lintVital（fatal 级 Lint 错误会中断构建，调试版发现不了）"
+            echo "- 用仓库内 debug 密钥签名，与现在手机上的试用装同签名"
+            echo "  → **可直接覆盖安装，不会丢数据**"
+            echo ""
+            echo "**没做的事**：没有打 tag、没有建 Release、没有占用版本号、"
+            echo "没有上传坚果云。想要正式发布时请改用「编译 Release 包」。"
+          } >> $GITHUB_STEP_SUMMARY
