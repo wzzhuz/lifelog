@@ -28,6 +28,8 @@ fun freshnessColor(f: Freshness): Color = when (f) {
     Freshness.SOON -> Color(0xFFE08C00)
     Freshness.DUE -> Color(0xFFE5484D)
     Freshness.NONE -> Color(0xFF9CA3AF)
+    // 按需事件：中性灰蓝，刻意不使用任何「紧急」色
+    Freshness.IDLE -> Color(0xFF94A3B8)
 }
 
 fun freshnessLabel(f: Freshness): String = when (f) {
@@ -35,6 +37,7 @@ fun freshnessLabel(f: Freshness): String = when (f) {
     Freshness.SOON -> "快到了"
     Freshness.DUE -> "该做了"
     Freshness.NONE -> "待记录"
+    Freshness.IDLE -> "按需"
 }
 
 @Composable

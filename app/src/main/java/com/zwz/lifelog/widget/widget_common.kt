@@ -43,6 +43,7 @@ internal fun freshnessColor(f: Freshness): ColorProvider = when (f) {
     Freshness.SOON -> ColorProvider(Color(0xFFE08C00))
     Freshness.DUE -> ColorProvider(Color(0xFFE5484D))
     Freshness.NONE -> ColorProvider(Color(0xFF9CA3AF))
+    Freshness.IDLE -> ColorProvider(Color(0xFF94A3B8))
 }
 
 /**

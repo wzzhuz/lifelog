@@ -14,7 +14,9 @@ import com.zwz.lifelog.ui.timeline.TimelineViewModel
 @Suppress("UNCHECKED_CAST")
 class LifeLogViewModelFactory(
     private val repo: LifeLogRepository,
-    private val eventId: Long = 0L
+    private val eventId: Long = 0L,
+    /** 新建子事件时所属疗程 id，0 表示普通事件。 */
+    private val parentId: Long = 0L
 ) : ViewModelProvider.Factory {
 
     override fun <T : ViewModel> create(modelClass: Class<T>): T = when {
@@ -25,7 +27,7 @@ class LifeLogViewModelFactory(
         modelClass.isAssignableFrom(DetailViewModel::class.java) ->
             DetailViewModel(repo, eventId) as T
         modelClass.isAssignableFrom(EditViewModel::class.java) ->
-            EditViewModel(repo, eventId) as T
+            EditViewModel(repo, eventId, parentId) as T
         else -> throw IllegalArgumentException("未知 ViewModel: ${modelClass.name}")
     }
 }

@@ -42,12 +42,15 @@ object ThemePrefs {
  * |---|---|---|
  * | COMPACT | 8~9 | 日常，事件 20 个以内 |
  * | COMFORT | 5~6 | 信息最完整 |
- * | GROUPED | 7~8 | 事件多，按分类找 |
+ *
+ * 曾有三种模式，第三种「GROUPED」（按分类分组、吸顶头、可折叠）已删除。
+ * 它是唯一需要第二套排序字段（sortInGroup）的功能，让首页数据流、
+ * 拖拽排序、偏好存储都要分叉处理；而筛选行的分类维度已能提供同样的
+ * 聚合视图，成本低一个数量级。
  */
 enum class HomeLayoutMode {
     COMPACT,   // 紧凑列表（默认）
-    COMFORT,   // 舒适列表
-    GROUPED    // 按分类分组，吸顶头 + 可折叠
+    COMFORT    // 舒适列表
 }
 
 private val Context.homeDataStore: DataStore<Preferences> by preferencesDataStore(name = "home_layout")
@@ -55,9 +58,6 @@ private val Context.homeDataStore: DataStore<Preferences> by preferencesDataStor
 object HomeLayoutPrefs {
 
     private val MODE = stringPreferencesKey("layout_mode")
-
-    /** 折叠状态：存分类名集合。分组模式专用。 */
-    private val COLLAPSED = stringPreferencesKey("collapsed_tags")
 
     fun modeFlow(context: Context): Flow<HomeLayoutMode> =
         context.homeDataStore.data.map {
@@ -67,18 +67,5 @@ object HomeLayoutPrefs {
 
     suspend fun setMode(context: Context, mode: HomeLayoutMode) {
         context.homeDataStore.edit { it[MODE] = mode.name }
-    }
-
-    fun collapsedFlow(context: Context): Flow<Set<String>> =
-        context.homeDataStore.data.map {
-            (it[COLLAPSED] ?: "").split('|').filter { s -> s.isNotBlank() }.toSet()
-        }
-
-    suspend fun toggleCollapsed(context: Context, tag: String) {
-        context.homeDataStore.edit { prefs ->
-            val cur = (prefs[COLLAPSED] ?: "").split('|').filter { it.isNotBlank() }.toMutableSet()
-            if (!cur.add(tag)) cur.remove(tag)
-            prefs[COLLAPSED] = cur.joinToString("|")
-        }
     }
 }

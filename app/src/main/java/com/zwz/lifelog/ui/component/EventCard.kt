@@ -35,10 +35,13 @@ import com.zwz.lifelog.domain.model.Freshness
 
 /** 卡片展示密度。 */
 enum class CardDensity {
-    /** 紧凑：约 76dp，一屏 8~9 个。进度条压成贴底细线，状态用圆点。 */
+    /**
+     * 紧凑：父事件 58dp / 子事件 48dp。
+     * 进度条压成贴底细线，状态用圆点。一屏可放 10 个以上。
+     */
     COMPACT,
 
-    /** 舒适：约 112dp，信息完整，状态用文字 chip。 */
+    /** 舒适：父事件 96dp / 子事件 84dp。信息完整，状态用文字 chip。 */
     COMFORT
 }
 
@@ -88,7 +91,12 @@ fun EventCard(
  * 紧凑卡片。
  *
  * 关键取舍：进度条从独立一行改为**贴底 2dp 细线**，
- * 不再占用纵向空间——这是高度能从 112dp 降到 76dp 的主因。
+ * 不再占用纵向空间。
+ *
+ * 高度：父事件 58dp，子事件 48dp。
+ * 内容是 emoji + 两行文字（约 38dp），此前写死 72dp 会让
+ * 文字只占一半、上下大片留白；打钩按钮 36dp 又与文字区等高，
+ * 进一步放大空旷感。现在按钮收到 32dp，高度贴合内容。
  */
 @Composable
 private fun CompactCard(
@@ -99,9 +107,13 @@ private fun CompactCard(
     onQuickRecord: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isChild = status.event.parentId != null
+    val cardHeight = if (isChild) 48.dp else 58.dp
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            // 子事件缩进：与父卡片错开一档，一眼看出是下一层
+            .then(if (isChild) Modifier.padding(start = 20.dp) else Modifier)
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
@@ -109,27 +121,38 @@ private fun CompactCard(
         tonalElevation = 1.dp
     ) {
         Box {
-            Row(modifier = Modifier.height(72.dp)) {
-                // 色条跟随卡片实际高度，不再写死 84dp。
-                // 写死曾导致色条比卡片矮 30~40dp，下方一截没颜色。
+            Row(modifier = Modifier.height(cardHeight)) {
+                // 色条跟随卡片实际高度。写死高度曾导致色条比卡片矮一截，
+                // 下方一段没颜色。
                 Box(
                     modifier = Modifier
                         .width(4.dp)
-                        .height(72.dp)
+                        .height(cardHeight)
                         .background(barColor)
                 )
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(start = 12.dp, end = 8.dp),
+                        .padding(start = 12.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 子事件左侧的引导线，颜色与色条同源但弱化，
+                    // 视觉上把子卡片挂到父卡片下面
+                    if (isChild) {
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .height(cardHeight - 20.dp)
+                                .background(barColor.copy(alpha = 0.35f))
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
                     Text(status.event.emoji, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                status.event.name,
+                                displayNameOf(status),
                                 style = MaterialTheme.typography.titleSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -147,20 +170,22 @@ private fun CompactCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Spacer(Modifier.width(4.dp))
-                    IconButton(
-                        onClick = onQuickRecord,
-                        modifier = Modifier.size(36.dp),
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = "记一笔",
-                            modifier = Modifier.size(18.dp)
-                        )
+                    if (!status.event.isCourse) {
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(
+                            onClick = onQuickRecord,
+                            modifier = Modifier.size(32.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "记一笔",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -186,9 +211,11 @@ private fun ComfortCard(
     onQuickRecord: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isChild = status.event.parentId != null
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .then(if (isChild) Modifier.padding(start = 20.dp) else Modifier)
             .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
@@ -196,11 +223,11 @@ private fun ComfortCard(
         tonalElevation = 1.dp
     ) {
         Row {
-            // fillMaxHeight 跟随内容，不再写死
+            // 高度跟随内容，不再写死；子事件矮一档
             Box(
                 modifier = Modifier
                     .width(4.dp)
-                    .height(112.dp)
+                    .height(if (isChild) 84.dp else 96.dp)
                     .background(barColor)
             )
             Column(modifier = Modifier.weight(1f).padding(14.dp)) {
@@ -208,7 +235,7 @@ private fun ComfortCard(
                     Text(status.event.emoji, style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        status.event.name,
+                        displayNameOf(status),
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -245,20 +272,22 @@ private fun ComfortCard(
                                 .background(barColor)
                         )
                     }
-                    Spacer(Modifier.width(10.dp))
-                    IconButton(
-                        onClick = onQuickRecord,
-                        modifier = Modifier.size(40.dp),
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = "记一笔",
-                            modifier = Modifier.size(20.dp)
-                        )
+                    if (!status.event.isCourse) {
+                        Spacer(Modifier.width(10.dp))
+                        IconButton(
+                            onClick = onQuickRecord,
+                            modifier = Modifier.size(40.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "记一笔",
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -285,12 +314,25 @@ private fun StatusDot(f: Freshness) {
  */
 @Composable
 private fun subtitleOf(s: EventStatusLite, now: Long): String {
-    if (s.lastTimestamp == null) return "点击右侧 ✓ 记一笔"
     val fmt = com.zwz.lifelog.util.TimeFormatter
     val parts = mutableListOf<String>()
+
+    // 频次型（「消炎药」）显示「今日 1/3」，疗程显示子事件汇总的「今日 2/5」
+    val progress = s.todayProgress
+        ?: com.zwz.lifelog.domain.usecase.StatusCalculator.courseProgress(s)
+    if (progress != null) parts.add(progress)
+
+    if (s.lastTimestamp == null) {
+        // 疗程没有自己的记录，别提示「记一笔」
+        if (s.parentName != null) parts.add(s.parentName)
+        return if (parts.isEmpty()) {
+            if (s.event.isCourse) "还没有子事件" else "点击右侧 ✓ 记一笔"
+        } else parts.joinToString(" · ")
+    }
+
     // 24 小时内显示小时：吃药这类间隔几小时的事件，写「今天」等于没说
     parts.add("上次 ${fmt.agoUnit(s.lastTimestamp, now)}")
-    if (s.avgGapMillis != null) {
+    if (s.avgGapMillis != null && s.event.timesPerDay == null) {
         parts.add("平均 ${fmt.duration(s.avgGapMillis)}")
     }
     if (s.recordCount >= 2 && s.predictedNextMillis != null) {
@@ -298,5 +340,16 @@ private fun subtitleOf(s: EventStatusLite, now: Long): String {
         // 基准不足 2 天的事件（吃药、测血糖），只给日期等于没给，得带上时分
         parts.add("预计 ${if (s.baselineDays < 2) fmt.short(next, now = now) else fmt.dateOnly(next)}")
     }
+    // 归属放在最后且弱化：父卡片可能已滚出屏幕，这里要能独立回答「属于谁」
+    if (s.parentName != null) parts.add(s.parentName)
     return parts.joinToString(" · ")
 }
+
+/**
+ * 列表里显示的名字。
+ *
+ * 子事件**不再**带「疗程 · 」前缀。前缀与缩进同时存在既重复又易被截断，
+ * 而缩进已经表达了层级；归属信息改由 [subtitleOf] 在副标题末尾承载，
+ * 这样主名保持短药名，滚动到列表中部也仍能确认属于哪次疗程。
+ */
+private fun displayNameOf(s: EventStatusLite): String = s.event.name

@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -69,12 +70,11 @@ fun TimelineScreen(
         Column(modifier = Modifier.padding(pad).fillMaxSize()) {
             TextField(
                 value = state.keyword,
-                onValueChange = { },
+                onValueChange = { vm.onKeyword(it) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text("搜全部记录（暂未启用，用主界面搜索）") },
-                enabled = false,
+                placeholder = { Text("在已加载的记录里搜索") },
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
                 colors = TextFieldDefaults.colors(
@@ -107,6 +107,17 @@ fun TimelineScreen(
                         }
                         items(rows, key = { "r-${it.record.id}" }) { row ->
                             TimelineItem(row = row, onClick = { onOpenDetail(row.eventId) })
+                        }
+                    }
+                    if (state.hasMore) {
+                        item {
+                            TextButton(
+                                onClick = { vm.loadMore() },
+                                enabled = !state.loadingMore,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                            ) {
+                                Text(if (state.loadingMore) "加载中…" else "加载更早的记录")
+                            }
                         }
                     }
                     item { Spacer(Modifier.height(60.dp)) }

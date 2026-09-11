@@ -2,13 +2,10 @@ package com.zwz.lifelog.ui.list
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.zwz.lifelog.data.HomeLayoutMode
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Freshness
 import com.zwz.lifelog.domain.model.Templates
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -93,17 +90,42 @@ data class ListUiState(
             // sortOrder 字段数据库里一直存在、DAO 也按它排，
             // 但此前**没有任何界面能修改它**，排序实际是「钉选→紧急度→名称」，
             // 等于这个字段白留。现在拖拽会写入它，排序逻辑也随之启用。
-            return list.sortedWith(
-                compareByDescending<EventStatusLite> { it.event.isPinned }
-                    .thenBy { it.event.sortOrder }
-                    .thenByDescending { it.ratio }
-                    .thenBy { it.event.name }
+            return withChildrenGrouped(
+                list.sortedWith(
+                    compareByDescending<EventStatusLite> { it.event.isPinned }
+                        .thenBy { it.event.sortOrder }
+                        .thenByDescending { it.ratio }
+                        .thenBy { it.event.name }
+                )
             )
+        }
+
+        /**
+         * 让子事件紧跟自己的疗程。
+         *
+         * 同时吃几种药时，散落在列表各处的「退烧药」「消炎药」
+         * 看不出它们属于同一次看病——按父事件聚在一起才读得懂。
+         *
+         * 疗程被筛掉的孤儿子事件（比如按分类筛掉了父）补在末尾，
+         * 保证不凭空消失。
+         */
+        private fun withChildrenGrouped(list: List<EventStatusLite>): List<EventStatusLite> {
+            if (list.none { it.event.parentId != null }) return list
+            val childrenOf = list.filter { it.event.parentId != null }
+                .groupBy { it.event.parentId }
+            val out = mutableListOf<EventStatusLite>()
+            list.forEach { st ->
+                if (st.event.parentId != null) return@forEach
+                out.add(st)
+                childrenOf[st.event.id]?.let { out.addAll(it) }
+            }
+            val seen = out.mapTo(mutableSetOf()) { it.event.id }
+            out.addAll(list.filter { it.event.parentId != null && it.event.id !in seen })
+            return out
         }
     }
 }
 
-@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
 
     private val keywordFlow = MutableStateFlow("")
@@ -139,25 +161,13 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
     ) { kw, hits, f, t -> QueryState(kw, hits, f, t) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), QueryState())
 
-    /** 当前布局模式。由 UI 注入，决定用哪个排序字段的查询。 */
-    private val layoutFlow = MutableStateFlow(HomeLayoutMode.COMPACT)
-
-    fun onLayoutMode(mode: HomeLayoutMode) { layoutFlow.value = mode }
-
     /**
      * 事件列表。
      *
-     * 两种模式走**不同的查询**：
-     * - 列表模式：ORDER BY sortOrder
-     * - 分组模式：ORDER BY tag, sortInGroup
-     *
-     * 因为两个字段各管各的排序，不能共用一个流。
+     * 分组模式删除后只有一套排序（sortOrder），不再需要按布局模式
+     * 切换查询，直接订阅单条流即可。
      */
-    private val statuses: StateFlow<List<EventStatusLite>> = layoutFlow
-        .flatMapLatest { mode ->
-            if (mode == HomeLayoutMode.GROUPED) repo.statusesLiteGrouped()
-            else repo.statusesLite()
-        }
+    private val statuses: StateFlow<List<EventStatusLite>> = repo.statusesLite()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
@@ -229,18 +239,6 @@ class ListViewModel(private val repo: LifeLogRepository) : ViewModel() {
         val all = ui.value.all.map { it.event.id }
         val hidden = all.filter { it !in visibleIds }
         repo.saveSortOrder(visibleIds + hidden)
-    }
-
-    /**
-     * 分组模式保存组内顺序。
-     *
-     * **只改 sortInGroup，不碰 sortOrder**。
-     * 这正是本次修复的核心：此前共用一个字段，
-     * 在分组里拖一下会把全局顺序重写成按标签排列。
-     */
-    /** [saveOrder] 的分组版，同样是挂起版。 */
-    suspend fun saveGroupOrder(groupIds: List<Long>) {
-        repo.saveGroupOrder(groupIds)
     }
 
     fun showTemplatePicker() { showTemplate.value = true }

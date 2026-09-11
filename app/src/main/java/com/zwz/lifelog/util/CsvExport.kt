@@ -11,9 +11,12 @@ object CsvExport {
 
     fun build(events: List<Event>, records: List<Record>): String {
         val nameOf = events.associateBy { it.id }
+        /** 子事件在导出的表格里带上所属疗程名，否则「退烧药」看不出是哪次开的。 */
+        val parentNameOf: (Long) -> String =
+            { eid -> nameOf[eid]?.parentId?.let { nameOf[it]?.name } ?: "" }
         val sb = StringBuilder()
         sb.append('\uFEFF') // BOM
-        sb.append("事件,分类,发生时间,距上次(天),备注,有照片,录入时间\n")
+        sb.append("事件,所属疗程,分类,发生时间,距上次(天),备注,有照片,录入时间\n")
         val grouped = records.groupBy { it.eventId }
         nameOf.keys.sortedBy { nameOf[it]?.name }.forEach { eid ->
             val ev = nameOf[eid] ?: return@forEach
@@ -23,6 +26,7 @@ object CsvExport {
                 sb.append(
                     listOf(
                         csv(ev.name),
+                        csv(parentNameOf(eid)),
                         csv(ev.tag ?: ""),
                         TimeFormatter.full(r.timestamp),
                         gap,

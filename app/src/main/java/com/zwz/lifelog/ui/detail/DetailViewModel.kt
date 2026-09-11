@@ -3,7 +3,9 @@ package com.zwz.lifelog.ui.detail
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.zwz.lifelog.data.LifeLogRepository
+import com.zwz.lifelog.domain.model.EventKind
 import com.zwz.lifelog.domain.model.EventStatus
+import com.zwz.lifelog.domain.model.EventStatusLite
 import com.zwz.lifelog.domain.model.Record
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -48,6 +50,15 @@ class DetailViewModel(
     val isLoadingMore: StateFlow<Boolean> = loading
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    /**
+     * 疗程的子事件状态（非疗程时为空）。
+     *
+     * 单独开一个流而不是塞进 [status]：子事件增删改时
+     * 不应牵动详情页记录分页的重组。
+     */
+    val children: StateFlow<List<EventStatusLite>> = repo.childrenStatuses(eventId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     /** 是否还有更早的记录可加载。 */
     fun hasMore(st: EventStatus?): Boolean =
         st != null && st.records.size < st.recordCount
@@ -81,6 +92,30 @@ class DetailViewModel(
         repo.setArchived(eventId, archived)
         onDone()
     }
+
+    /**
+     * 结束疗程：疗程与全部子事件一并归档。
+     *
+     * @return 一并归档的子事件数，供 UI 提示
+     */
+    suspend fun endCourse(): Int {
+        val n = repo.activeChildCount(eventId)
+        repo.endCourse(eventId)
+        return n
+    }
+
+    /** 疗程（含子事件）的记录总数，确认文案用。 */
+    suspend fun courseRecordCount(): Int = repo.courseRecordCount(eventId)
+
+    /** 疗程下未归档子事件数，确认文案用。 */
+    suspend fun activeChildCount(): Int = repo.activeChildCount(eventId)
+
+    fun quickRecordChild(childId: Long, onDone: (String) -> Unit) = viewModelScope.launch {
+        repo.quickRecord(childId)
+        onDone(repo.eventById(childId)?.name ?: "")
+    }
+
+    fun isCourse(): Boolean = status.value?.event?.kind == EventKind.COURSE
 
     fun deleteEvent(onDone: () -> Unit) = viewModelScope.launch {
         repo.deleteEvent(eventId)

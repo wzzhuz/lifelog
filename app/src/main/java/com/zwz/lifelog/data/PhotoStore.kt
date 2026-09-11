@@ -68,4 +68,17 @@ class PhotoStore(private val context: Context) {
     fun delete(name: String) {
         runCatching { File(photoDir, name).delete() }
     }
+
+    /**
+     * 清空整个照片目录。
+     *
+     * 覆盖导入会 `clearAllTables()`，记录被 CASCADE 清空，
+     * 但**照片文件在私有目录，不会跟着被删**——不清就全成孤儿文件。
+     * 因此覆盖导入前必须先调这里。
+     */
+    suspend fun deleteAll() = withContext(Dispatchers.IO) {
+        runCatching {
+            photoDir.listFiles()?.forEach { f -> if (f.isFile) f.delete() }
+        }
+    }
 }

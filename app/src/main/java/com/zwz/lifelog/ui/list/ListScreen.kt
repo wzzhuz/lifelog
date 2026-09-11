@@ -58,13 +58,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.zwz.lifelog.domain.model.EventKind
 import com.zwz.lifelog.domain.model.Templates
 import com.zwz.lifelog.ui.component.EventCard
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.text.font.FontWeight
 import com.zwz.lifelog.data.HomeLayoutMode
 import com.zwz.lifelog.domain.model.EventStatusLite
@@ -83,9 +83,7 @@ fun ListScreen(
     onOpenTimeline: () -> Unit,
     onOpenSettings: () -> Unit,
     onDataChanged: () -> Unit,
-    layoutMode: HomeLayoutMode = HomeLayoutMode.COMPACT,
-    collapsedTags: Set<String> = emptySet(),
-    onToggleCollapse: (String) -> Unit = {}
+    layoutMode: HomeLayoutMode = HomeLayoutMode.COMPACT
 ) {
     val state by vm.ui.collectAsState()
     // 整屏共用一个「现在」：卡片副标题的「8 小时前」由它驱动，
@@ -93,10 +91,9 @@ fun ListScreen(
     val now by vm.now.collectAsState()
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(layoutMode) { vm.onLayoutMode(layoutMode) }
     val density = when (layoutMode) {
         HomeLayoutMode.COMPACT -> CardDensity.COMPACT
-        HomeLayoutMode.COMFORT, HomeLayoutMode.GROUPED -> CardDensity.COMFORT
+        HomeLayoutMode.COMFORT -> CardDensity.COMFORT
     }
 
     Scaffold(
@@ -228,25 +225,6 @@ fun ListScreen(
 
             if (state.visible.isEmpty()) {
                 EmptyState(hasData = state.all.isNotEmpty()) { vm.showTemplatePicker() }
-            } else if (layoutMode == HomeLayoutMode.GROUPED) {
-                // 分组模式：按标签归组，吸顶头 + 可折叠
-                GroupedList(
-                    visible = state.visible,
-                    collapsed = collapsedTags,
-                    density = density,
-                    now = now,
-                    onToggleCollapse = { onToggleCollapse(it) },
-                    onSaveOrder = { ids -> vm.saveGroupOrder(ids) },
-                    onOpenDetail = onOpenDetail,
-                    onQuickRecord = { id ->
-                        vm.quickRecord(id) { name ->
-                            onDataChanged()
-                            scope.launch {
-                                snack.showSnackbar("已记录：$name", actionLabel = "撤销")
-                            }
-                        }
-                    }
-                )
             } else {
                 // 列表模式（紧凑 / 舒适）：支持长按拖拽排序
                 //
@@ -439,7 +417,12 @@ private fun TemplateSheet(vm: ListViewModel, onDone: (Int) -> Unit) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(t.name, style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                t.tag + (if (t.targetDays != null) " · 约 ${t.targetDays} 天" else " · 无固定周期"),
+                                t.tag + when {
+                                    t.kind == EventKind.COURSE -> " · 疗程"
+                                    t.kind == EventKind.ON_DEMAND -> " · 按需（不催）"
+                                    t.targetDays != null -> " · 约 ${t.targetDays} 天"
+                                    else -> " · 无固定周期"
+                                },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -455,182 +438,6 @@ private fun TemplateSheet(vm: ListViewModel, onDone: (Int) -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(12.dp)
             ) { Text("导入 ${selected.size} 个") }
-        }
-    }
-}
-
-/**
- * 分组模式的列表。
- *
- * 三个设计点：
- *
- * **1. 默认全部展开**
- * 点开才看到事件会多一层操作，违背「一眼看到所有该做的事」。
- * 折叠权交给用户。
- *
- * **2. 拖拽仅限组内**
- * 跨组拖拽意味着改分类标签——那是「移动」不是「排序」。
- * 实现上把分组头也作为列表项，用 [GroupRow] 密封类型表达，
- * 拖拽时禁止越过任何分组头。
- *
- * **3. 无标签归入「未分类」**
- * 避免事件凭空消失在分组视图里。
- */
-@Composable
-private fun GroupedList(
-    visible: List<EventStatusLite>,
-    collapsed: Set<String>,
-    density: CardDensity,
-    /** 渲染「距今」文案的时刻，由调用方统一提供。 */
-    now: Long,
-    onToggleCollapse: (String) -> Unit,
-    onOpenDetail: (Long) -> Unit,
-    onQuickRecord: (Long) -> Unit,
-    /** 挂起版：调用方要等它返回才能解除「拖拽优先」的冻结。 */
-    onSaveOrder: suspend (List<Long>) -> Unit
-) {
-    val groups = remember(visible) {
-        visible
-            .groupBy { it.event.tag?.takeIf { t -> t.isNotBlank() } ?: "未分类" }
-            .toList()
-            .sortedBy { it.first }
-    }
-
-    // 扁平化：[头, 事件…, 头, 事件…]
-    // 拖拽在这个扁平列表上进行，分组头是天然的边界。
-    val flat = remember(groups, collapsed) {
-        val out = mutableListOf<GroupRow>()
-        groups.forEach { (tag, list) ->
-            out.add(GroupRow.Header(tag, list.size, tag in collapsed))
-            if (tag !in collapsed) list.forEach { out.add(GroupRow.Item(it)) }
-        }
-        out
-    }
-
-    // 每个位置属于第几组，用于判断能否跨组移动
-    val groupIndexOf = remember(flat) {
-        var g = -1
-        flat.map {
-            if (it is GroupRow.Header) g += 1
-            g
-        }
-    }
-
-    val rows = remember { mutableStateListOf<GroupRow>() }
-    var dragging by remember { mutableStateOf(false) }
-    var saving by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(flat, dragging, saving) {
-        if (dragging || saving) return@LaunchedEffect
-        // 比较内容而非结构：记完一笔后分组和顺序往往都没变，
-        // 只有 EventStatusLite 里的「上次 8 小时前」变了，
-        // 只比结构会把这次更新判成「无需同步」。
-        if (rows.toList() != flat) {
-            rows.clear()
-            rows.addAll(flat)
-        }
-    }
-
-    DragSortLazyColumn(
-        items = rows,
-        keyOf = { row ->
-            when (row) {
-                is GroupRow.Header -> "h:" + row.tag
-                is GroupRow.Item -> "i:" + row.status.event.id
-            }
-        },
-        // 关键：不允许跨组（组号必须相同），也不允许拖到第 0 个之前
-        canMove = { from, to -> groupIndexOf.getOrNull(from) == groupIndexOf.getOrNull(to) },
-        onReorder = { from, to ->
-            dragging = true
-            if (from in rows.indices && to in rows.indices) {
-                val moved = rows.removeAt(from)
-                rows.add(to, moved)
-            }
-        },
-        onDragEnd = {
-            scope.launch {
-                saving = true
-                try {
-                    // 只提交所有 Item 的当前顺序。
-                    // saveGroupOrder 会用组内下标重新编号 sortInGroup，
-                    // 分组之间本来就按标签名排序，不需要跨组编号。
-                    onSaveOrder(rows.filterIsInstance<GroupRow.Item>().map { it.status.event.id })
-                    // 等 Room 的失效通知回传，否则会先闪回旧顺序再跳到
-                    // 新顺序。分组模式下各组按标签名排序，不方便直接
-                    // 用 id 顺序比对，这里给一个短延时即可。
-                    delay(150)
-                } finally {
-                    saving = false
-                    dragging = false
-                }
-            }
-        },
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) { row, _, _ ->
-        when (row) {
-            is GroupRow.Header -> GroupHeader(
-                tag = row.tag,
-                count = row.count,
-                collapsed = row.collapsed,
-                onToggle = { onToggleCollapse(row.tag) }
-            )
-            is GroupRow.Item -> EventCard(
-                status = row.status,
-                density = density,
-                now = now,
-                onClick = { onOpenDetail(row.status.event.id) },
-                onQuickRecord = { onQuickRecord(row.status.event.id) }
-            )
-        }
-    }
-}
-
-/** 分组列表的行：要么是分组头，要么是事件卡片。 */
-private sealed class GroupRow {
-    data class Header(val tag: String, val count: Int, val collapsed: Boolean) : GroupRow()
-    data class Item(val status: EventStatusLite) : GroupRow()
-}
-
-@Composable
-private fun GroupHeader(
-    tag: String,
-    count: Int,
-    collapsed: Boolean,
-    onToggle: () -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp, horizontal = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                if (collapsed) "▸" else "▾",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                tag,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "$count",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
