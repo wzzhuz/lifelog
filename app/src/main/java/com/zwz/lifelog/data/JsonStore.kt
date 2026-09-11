@@ -3,6 +3,7 @@ package com.zwz.lifelog.data
 import android.content.Context
 import android.util.Log
 import com.zwz.lifelog.domain.model.Event
+import com.zwz.lifelog.domain.model.EventKind
 import com.zwz.lifelog.domain.model.Record
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -177,7 +178,10 @@ class JsonStore(private val context: Context) {
             o.put("name", e.name)
             o.put("emoji", e.emoji)
             o.put("colorArgb", e.colorArgb)
+            o.put("kind", e.kind.name)
             if (e.targetDays != null) o.put("targetDays", e.targetDays)
+            if (e.timesPerDay != null) o.put("timesPerDay", e.timesPerDay)
+            if (e.parentId != null) o.put("parentId", e.parentId)
             if (e.tag != null) o.put("tag", e.tag)
             if (e.note != null) o.put("note", e.note)
             o.put("isPinned", e.isPinned)
@@ -216,7 +220,10 @@ class JsonStore(private val context: Context) {
                     name = o.optString("name", "未命名"),
                     emoji = o.optString("emoji", "\uD83D\uDCCC"),
                     colorArgb = o.optInt("colorArgb", 0xFF2F6FED.toInt()),
+                    kind = EventKind.of(o.optString("kind", null)),
                     targetDays = td,
+                    timesPerDay = if (o.has("timesPerDay")) o.optInt("timesPerDay") else null,
+                    parentId = if (o.has("parentId")) o.optLong("parentId") else null,
                     tag = o.optString("tag", "").ifBlank { null },
                     note = o.optString("note", "").ifBlank { null },
                     isPinned = o.optBoolean("isPinned", false),

@@ -62,8 +62,6 @@ import kotlinx.coroutines.launch
 fun <T> DragSortLazyColumn(
     items: List<T>,
     keyOf: (T) -> Any,
-    /** 返回 false 表示不允许移动到该位置（如跨越分组头）。 */
-    canMove: (fromIndex: Int, toIndex: Int) -> Boolean = { _, _ -> true },
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
     onDragEnd: () -> Unit,
     modifier: Modifier = Modifier,
@@ -156,7 +154,6 @@ fun <T> DragSortLazyColumn(
                                         listState = listState,
                                         fromIndex = current,
                                         totalOffsetY = totalDrag,
-                                        canMove = canMove,
                                         itemCount = items.size
                                     )
                                     targetIndex = t
@@ -227,7 +224,6 @@ private fun resolveTargetIndex(
     listState: LazyListState,
     fromIndex: Int,
     totalOffsetY: Float,
-    canMove: (fromIndex: Int, toIndex: Int) -> Boolean,
     itemCount: Int
 ): Int {
     val info = listState.layoutInfo.visibleItemsInfo
@@ -243,7 +239,6 @@ private fun resolveTargetIndex(
             val step = next?.size?.toFloat() ?: self.size.toFloat()
             if (accumulated + step / 2 > totalOffsetY) break
             accumulated += step
-            if (!canMove(fromIndex, k)) break
             target = k
         }
     } else if (totalOffsetY < 0) {
@@ -253,7 +248,6 @@ private fun resolveTargetIndex(
             val step = prev?.size?.toFloat() ?: self.size.toFloat()
             if (accumulated - step / 2 < totalOffsetY) break
             accumulated -= step
-            if (!canMove(fromIndex, k)) break
             target = k
         }
     }

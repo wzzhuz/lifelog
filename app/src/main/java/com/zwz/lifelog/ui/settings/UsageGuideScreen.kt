@@ -75,6 +75,7 @@ fun UsageGuideScreen(onBack: () -> Unit) {
                 ColorRow(Color(0xFFE08C00), "黄色 · 快到了", "接近该做的时间")
                 ColorRow(Color(0xFFE5484D), "红色 · 该做了", "已经到或超过判断基准")
                 ColorRow(Color(0xFF9CA3AF), "灰色 · 待记录", "这个事件还没有任何记录")
+                ColorRow(Color(0xFF94A3B8), "灰蓝 · 按需", "这件事没有周期，系统不催你")
             }
 
             // ---------- 2. 判断基准 ----------
@@ -89,11 +90,38 @@ fun UsageGuideScreen(onBack: () -> Unit) {
                 NumberItem(3, "都没有则兜底 30 天")
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "第 2 条是本应用的关键：看病、同房这类事没有固定规律，" +
-                        "你不必提前设间隔。记满两次后，系统会自己学会你的节奏，" +
+                    "第 2 条是本应用的关键：不设间隔也能用。" +
+                        "记满两次后，系统会自己学会你的节奏，" +
                         "之后就按这个节奏判断该不该做。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "例外：**按需**类型的事件（感冒看病、针灸这类没有周期的事）" +
+                        "不参与上面三条判定，永远只显示「上次距今多久」，不会变红。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // ---------- 2.5 疗程与子事件 ----------
+            GuideSection(title = "疗程：一次看病开的几种药") {
+                Text(
+                    "新建事件时把类型选成「疗程」，比如「感冒 2026-09」，" +
+                        "再在它的详情页把这次开的药一个个加进去（可分别设每日 2 次、3 次）。",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(Modifier.height(8.dp))
+                EntryRow("卡片显示「今日 1/3」", "只看当天完成了几次", "不统计连续天数，漏记不补、也不惩罚")
+                EntryRow("子事件紧跟疗程", "名字显示为「感冒 2026-09 · 退烧药」", "一眼看出这是哪次开的")
+                EntryRow("疗程结束", "详情页底部一键结束", "疗程与全部子事件一并归档，可整体恢复")
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "感冒好了就结束疗程，首页不再被它占着；" +
+                        "下次再病就新建一个疗程，历史记录各自留着，互不影响。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 

@@ -384,12 +384,6 @@ fun SettingsScreen(
                     desc = "一屏约 5~6 个，信息最完整",
                     onClick = { scope.launch { HomeLayoutPrefs.setMode(context, HomeLayoutMode.COMFORT) } }
                 )
-                LayoutOption(
-                    selected = layoutMode == HomeLayoutMode.GROUPED,
-                    title = "按分类分组",
-                    desc = "吸顶分类头，可折叠",
-                    onClick = { scope.launch { HomeLayoutPrefs.setMode(context, HomeLayoutMode.GROUPED) } }
-                )
             }
 
             Spacer(Modifier.height(10.dp))
@@ -406,6 +400,27 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(12.dp)
             ) { Text("年度回顾") }
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("维护")
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        repo.recomputeDerived()
+                        onDataChanged()
+                        snack.showSnackbar("已按实际记录重建派生数据")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) { Text("重建派生数据（次数 · 上次时间）") }
+            Text(
+                "首页显示的次数与「上次距今」来自事件表上的缓存字段。" +
+                    "如果发现数字与记录对不上，点这里按实际记录重算一次，不会丢失任何数据。",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp)
+            )
 
             Spacer(Modifier.height(24.dp))
             SectionTitle("帮助")

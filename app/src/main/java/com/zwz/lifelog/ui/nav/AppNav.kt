@@ -37,14 +37,15 @@ object Route {
     const val TIMELINE = "timeline"
     const val SETTINGS = "settings"
     const val DETAIL = "detail/{eventId}"
-    const val EDIT_EVENT = "edit_event/{eventId}"
+    const val EDIT_EVENT = "edit_event/{eventId}?parentId={parentId}"
     const val ADD_RECORD = "add_record/{eventId}/{recordId}"
     const val YEAR_REVIEW = "year_review"
     const val USAGE_GUIDE = "usage_guide"
     const val ARCHIVED = "archived"
 
     fun detail(eventId: Long) = "detail/$eventId"
-    fun editEvent(eventId: Long) = "edit_event/$eventId"
+    /** @param parentId 非 0 时新建的是该疗程下的子事件。 */
+    fun editEvent(eventId: Long, parentId: Long = 0L) = "edit_event/$eventId?parentId=$parentId"
     fun addRecord(eventId: Long, recordId: Long = 0L) = "add_record/$eventId/$recordId"
 }
 
@@ -58,8 +59,6 @@ fun AppNav(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val layoutMode by HomeLayoutPrefs.modeFlow(context)
         .collectAsState(initial = HomeLayoutMode.COMPACT)
-    val collapsedTags by HomeLayoutPrefs.collapsedFlow(context)
-        .collectAsState(initial = emptySet())
 
     NavHost(navController = nav, startDestination = Route.LIST) {
 
@@ -72,11 +71,7 @@ fun AppNav(
                 onOpenTimeline = { nav.navigate(Route.TIMELINE) },
                 onOpenSettings = { nav.navigate(Route.SETTINGS) },
                 onDataChanged = onDataChanged,
-                layoutMode = layoutMode,
-                collapsedTags = collapsedTags,
-                onToggleCollapse = { tag ->
-                    scope.launch { HomeLayoutPrefs.toggleCollapsed(context, tag) }
-                }
+                layoutMode = layoutMode
             )
         }
 
@@ -128,16 +123,22 @@ fun AppNav(
                 onEditEvent = { nav.navigate(Route.editEvent(it)) },
                 onAddRecord = { nav.navigate(Route.addRecord(it)) },
                 onEditRecord = { eid, rid -> nav.navigate(Route.addRecord(eid, rid)) },
+                onAddChild = { parentId -> nav.navigate(Route.editEvent(0L, parentId)) },
+                onOpenChild = { nav.navigate(Route.detail(it)) },
                 onDataChanged = onDataChanged
             )
         }
 
         composable(
             Route.EDIT_EVENT,
-            arguments = listOf(navArgument("eventId") { type = NavType.LongType })
+            arguments = listOf(
+                navArgument("eventId") { type = NavType.LongType },
+                navArgument("parentId") { type = NavType.LongType; defaultValue = 0L }
+            )
         ) { backStack ->
             val id = backStack.arguments?.getLong("eventId") ?: 0L
-            val vm: EditViewModel = viewModel(factory = LifeLogViewModelFactory(repo, id))
+            val parentId = backStack.arguments?.getLong("parentId") ?: 0L
+            val vm: EditViewModel = viewModel(factory = LifeLogViewModelFactory(repo, id, parentId))
             EditEventScreen(
                 vm = vm,
                 onBack = { nav.popBackStack() },

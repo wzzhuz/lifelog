@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zwz.lifelog.data.LifeLogRepository
+import com.zwz.lifelog.data.db.isCourseRow
 import kotlinx.coroutines.launch
 
 /**
@@ -118,14 +119,34 @@ fun ArchivedScreen(
             )
             Spacer(Modifier.height(12.dp))
 
+            // 归档列表里同样要看出层级：疗程带子事件数，子事件带所属疗程名
+            val childCountOf = rows.filter { it.parentId != null }
+                .groupBy { it.parentId }
+                .mapValues { it.value.size }
+            val parentNameOf = rows.associateBy { it.id }
+
             rows.forEach { row ->
                 ArchivedRow(
                     emoji = row.emoji,
                     name = row.name,
                     recordCount = row.recordCount,
+                    hint = when {
+                        row.isCourseRow() -> {
+                            val n = childCountOf[row.id] ?: 0
+                            "疗程 · $n 个子事件"
+                        }
+                        row.parentId != null ->
+                            row.parentId?.let { pid ->
+                                "属于 ${parentNameOf[pid]?.name ?: "已删除的疗程"}"
+                            }
+                        else -> null
+                    },
                     onRestore = {
                         scope.launch {
-                            repo.setArchived(row.id, false)
+                            // 疗程恢复时把子事件一起带回来，
+                            // 否则会出现「疗程在首页、药还在归档里」的半吊子状态
+                            if (row.isCourseRow()) repo.restoreCourse(row.id)
+                            else repo.setArchived(row.id, false)
                             onDataChanged()
                             snack.showSnackbar("已恢复：${row.name}")
                         }
@@ -175,6 +196,8 @@ private fun ArchivedRow(
     emoji: String,
     name: String,
     recordCount: Int,
+    /** 层级提示：疗程显示子事件数，子事件显示所属疗程。 */
+    hint: String?,
     onRestore: () -> Unit,
     onDelete: () -> Unit
 ) {
