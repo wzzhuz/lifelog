@@ -28,7 +28,7 @@ on:
         description: 'R8 混淆与资源压缩'
         required: false
         type: choice
-        default: 'both'
+        default: 'on'
         # 必须加引号：裸写 `on` 会被 YAML 1.1 解析成布尔 true，
         # 与 default 的字符串类型对不上，GitHub 会**静默不注册**这个工作流
         # （文件在仓库里、Actions 页面却找不到，也触发不了）
