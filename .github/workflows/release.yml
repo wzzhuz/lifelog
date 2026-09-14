@@ -81,31 +81,16 @@ jobs:
       #           能用，但任何拿到你仓库的人都能签出「同名同签名」的包，
       #           所以仅供自用测试，不建议对外分发。
       # ---------------------------------------------------------------
-      # 四项全部取到才启用正式签名。
-      # 关键：Secret 缺失时 ${{ secrets.X }} 会展开成空串，直接 echo 进 GITHUB_ENV
-      # 写进去的仍是空值 —— Gradle 侧 isNotBlank() 判假，release 静默回退 debug 签名，
-      # 而这里却照样打印「✅ 使用正式密钥」。必须逐个校验通过后再写入 $GITHUB_ENV。
+      # 逻辑抽到 .github/scripts/prepare-signing.sh，与「出体验包」共用一份。
+      # 签名是安全敏感逻辑，两份拷贝迟早走样 —— 此前正是因此出现
+      # 「日志说用了正式密钥、实际回退 debug」且无人察觉。
+      #
+      # 四项全部取到才启用正式签名：Secret 缺失时 ${{ secrets.X }} 会展开成空串，
+      # 直接 echo 进 GITHUB_ENV 写进去的仍是空值，Gradle 侧 isNotBlank() 判假，
+      # release 就会静默回退 debug 签名。缺 Secret 时脚本同样回退，
+      # 随后「校验签名信息」会直接中断构建。
       - name: 准备签名密钥
-        run: |
-          MISSING=""
-          [ -n "$RELEASE_KEYSTORE_B64" ] || MISSING="$MISSING RELEASE_KEYSTORE_BASE64"
-          [ -n "$STORE_PW" ]             || MISSING="$MISSING KEYSTORE_PASSWORD"
-          [ -n "$KEY_ALIAS_V" ]          || MISSING="$MISSING KEY_ALIAS"
-          [ -n "$KEY_PW" ]               || MISSING="$MISSING KEY_PASSWORD"
-
-          if [ -n "$MISSING" ]; then
-            echo "⚠️  缺少 Secret:$MISSING"
-            echo "   → 将回退使用仓库内的 debug.keystore（仅供自用测试，不建议对外分发）"
-            echo "   补齐路径：Settings → Secrets and variables → Actions → Repository secrets"
-          else
-            echo "$RELEASE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/lifelog-release.keystore"
-            echo "LIFELOG_KEYSTORE_FILE=$RUNNER_TEMP/lifelog-release.keystore" >> $GITHUB_ENV
-            echo "LIFELOG_STORE_PASSWORD=$STORE_PW"  >> $GITHUB_ENV
-            echo "LIFELOG_KEY_ALIAS=$KEY_ALIAS_V"    >> $GITHUB_ENV
-            # PKCS12 下私钥即用 storepass 加密，keyPassword 必须与 storePassword 一致
-            echo "LIFELOG_KEY_PASSWORD=$KEY_PW"      >> $GITHUB_ENV
-            echo "✅ 使用 Secrets 中的正式签名密钥"
-          fi
+        run: bash .github/scripts/prepare-signing.sh >> "$GITHUB_ENV"
         env:
           RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PW:             ${{ secrets.KEYSTORE_PASSWORD }}
