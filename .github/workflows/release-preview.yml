@@ -169,6 +169,19 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # continue-on-error 会把失败步骤显示成成功（conclusion=success 而
+      # outcome=failure），不显式告警就会出现「流水线全绿但拿不到包」。
+      - name: 制品上传失败告警
+        if: steps.upload_preview.outcome == 'failure'
+        run: |
+          echo "### ⚠️ 体验包未上传到 Actions 制品" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "APK 已编译并用正式密钥签名，仅上传失败，无法在 Artifacts 下载。" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "常见原因是账号级存储配额打满（Free 计划 500MB，所有仓库共享，\" >> "$GITHUB_STEP_SUMMARY"
+          echo "还与 Packages 共用）。可用「清理制品」workflow 全量清理，\" >> "$GITHUB_STEP_SUMMARY"
+          echo "或到 Settings → Billing 设置 Actions 预算立即解除。" >> "$GITHUB_STEP_SUMMARY"
+
       # 体验包按 commit sha 命名，天然不重名，会一直堆积。
       # 只留最新一个：想对比时现场重新构建即可，不值得占着共享配额。
       - name: 只保留最新 1 个体验包
