@@ -35,7 +35,11 @@ fun signingValue(propKey: String, envKey: String): String =
 val releaseStoreFile = signingValue("storeFile", "LIFELOG_KEYSTORE_FILE")
 val releaseStorePassword = signingValue("storePassword", "LIFELOG_STORE_PASSWORD")
 val releaseKeyAlias = signingValue("keyAlias", "LIFELOG_KEY_ALIAS")
-val releaseKeyPassword = signingValue("keyPassword", "LIFELOG_KEY_PASSWORD")
+// PKCS12 只有一把锁：私钥就是用 storepass 加密的，keytool 会忽略 -keypass。
+// 因此 keyPassword 未单独配置时直接复用 storePassword —— 否则空值会让
+// useReleaseSigning 判假，release 构建静默回退 debug 签名且不报任何错。
+val releaseKeyPasswordRaw = signingValue("keyPassword", "LIFELOG_KEY_PASSWORD")
+val releaseKeyPassword = releaseKeyPasswordRaw.ifBlank { releaseStorePassword }
 
 val useReleaseSigning = releaseStoreFile.isNotBlank()
     && file(releaseStoreFile).exists()
