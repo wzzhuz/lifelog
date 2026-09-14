@@ -24,7 +24,7 @@ on:
         description: '开启 R8 代码混淆与资源压缩（可能增加小组件出问题的风险）'
         required: false
         type: boolean
-        default: false
+        default: true
       build_aab:
         description: '同时编译 AAB（上架 Google Play 用，国内一般用不到）'
         required: false
