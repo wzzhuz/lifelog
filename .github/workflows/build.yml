@@ -100,6 +100,19 @@ jobs:
 
       # 原生只支持按天数保留，做不到「只留最新 N 个」。
       # debug 包每次 push 都会重建，留最新一个足够回溯，稳态占用固定在约 20MB。
+      # continue-on-error 会让失败步骤显示为成功，容易漏看；
+      # 这里显式告警，避免「流水线全绿但 APK 一直没上传上去」。
+      - name: 制品上传失败告警
+        if: steps.upload_apk.outcome == 'failure'
+        run: |
+          echo "### ⚠️ debug APK 未上传到 Actions 制品" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "编译与单元测试均通过，仅制品上传失败。常见原因是账号级存储配额打满" \
+               "（Free 计划 500MB，所有仓库共享，还与 Packages 共用）。" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "排查：Settings → Billing → 查看 Actions & Packages 存储用量；" \
+               "或用「清理制品」workflow 全量清理。" >> "$GITHUB_STEP_SUMMARY"
+
       - name: 只保留最新 1 个 debug 包
         if: steps.upload_apk.outcome == 'success'
         env:

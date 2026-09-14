@@ -175,6 +175,7 @@ jobs:
       # 上传失败不中断：后面还有「创建 Release 附件」和「上传坚果云」两条
       # 交付路径，都不占 Actions 制品配额。配额打满时，APK 仍能从这两处取到。
       - name: 上传 Release APK
+        id: upload_release_apk
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -191,6 +192,16 @@ jobs:
         run: |
           bash .github/scripts/cleanup-artifacts.sh \
             --pattern 'lifelog-v*' --keep 5
+
+      # 上传失败时给出明确告警（continue-on-error 会把失败步骤显示成成功）
+      - name: 制品上传失败告警
+        if: steps.upload_release_apk.outcome == 'failure'
+        run: |
+          echo "### ⚠️ Release APK 未上传到 Actions 制品" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "APK 已编译并签名，仅制品上传失败（Release 附件与坚果云不受影响）。" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "常见原因是账号级存储配额打满，详见「清理制品」workflow 的说明。" >> "$GITHUB_STEP_SUMMARY"
 
       - name: 上传 AAB
         if: inputs.build_aab
