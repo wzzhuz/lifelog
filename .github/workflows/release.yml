@@ -172,7 +172,10 @@ jobs:
 
       # artifact 名与文件名保持一致，都用 ASCII，避免 Release 页与 Actions 页
       # 显示不一致（详见「重命名产物」步骤的说明）。
+      # 上传失败不中断：后面还有「创建 Release 附件」和「上传坚果云」两条
+      # 交付路径，都不占 Actions 制品配额。配额打满时，APK 仍能从这两处取到。
       - name: 上传 Release APK
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.rename.outputs.apk_name }}
@@ -191,6 +194,7 @@ jobs:
 
       - name: 上传 AAB
         if: inputs.build_aab
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: lifelog-aab-${{ steps.ver.outputs.version }}

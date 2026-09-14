@@ -136,6 +136,8 @@ jobs:
           done | tee /tmp/summary.md
 
       - name: 上传体验包
+        id: upload_preview
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: lifelog-preview-${{ steps.ver.outputs.sha }}
@@ -147,6 +149,7 @@ jobs:
       # 体验包按 commit sha 命名，天然不重名，会一直堆积。
       # 只留最新一个：想对比时现场重新构建即可，不值得占着共享配额。
       - name: 只保留最新 1 个体验包
+        if: steps.upload_preview.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

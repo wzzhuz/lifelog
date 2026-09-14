@@ -58,8 +58,15 @@ jobs:
       - name: 运行单元测试
         run: gradle testDebugUnitTest --stacktrace --no-daemon
 
+      # 制品上传失败不应拖垮整条流水线。
+      # 配额是账号级共享且按 **GB-月累计** 计：一旦本月累计用量打满，
+      # 所有仓库的上传都会被拒绝，删除制品只减慢后续增长、不退还已累计用量，
+      # 要等下个计费周期重置（详见 .github/workflows/cleanup.yml 的说明）。
+      # 置为 continue-on-error 后，编译/测试/签名校验等真正的质量门禁照常生效，
+      # 上传失败只标注为失败步骤，不再中断后续发布动作。
       - name: 上传测试报告
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: 单元测试报告
@@ -82,6 +89,8 @@ jobs:
       # （表现为「上传」1 秒失败，而编译步骤全部成功，错误信息不提配额）。
       # retention 设 1 天兜底，真正的控制交给后面的「只留最新 1 个」清理。
       - name: 上传 APK 产物
+        id: upload_apk
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: 生活手记-debug-apk
@@ -92,6 +101,7 @@ jobs:
       # 原生只支持按天数保留，做不到「只留最新 N 个」。
       # debug 包每次 push 都会重建，留最新一个足够回溯，稳态占用固定在约 20MB。
       - name: 只保留最新 1 个 debug 包
+        if: steps.upload_apk.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -110,6 +120,9 @@ jobs:
   release:
     name: 打 tag 时生成 Release
     needs: build
+    # 制品配额打满时 artifact 会缺失，此时下载必然失败；
+    # 与其红一整个 job，不如跳过（正式包请走「编译 Release 包」，
+    # 那条路径的交付不依赖 Actions 制品）。
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -117,12 +130,14 @@ jobs:
 
     steps:
       - name: 下载刚编译好的 APK
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: 生活手记-debug-apk
           path: ./apk
 
       - name: 创建 GitHub Release
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           files: ./apk/app-debug.apk
