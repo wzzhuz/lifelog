@@ -1,0 +1,105 @@
+name: 清理制品
+
+# ---------------------------------------------------------------------------
+# 通用制品清理，可原样复制到其他仓库使用。
+#
+# 为什么需要它：
+#   GitHub 只支持按「天数」保留制品（retention-days），做不到「只留最新 N 个」。
+#   而制品配额是账号级共享的（Free 计划 500MB，还与 GitHub Packages 共用），
+#   每次 push 都产包的项目几天就会打满；打满后所有 upload-artifact 步骤会被
+#   服务端直接拒绝，表现为「上传步骤 1 秒失败，而前面编译全部成功」——
+#   错误信息不提配额，很难定位。
+#
+# 典型用法：
+#   1. 先跑一次预演（默认 dry_run=true），确认要删的清单
+#   2. 关掉预演再跑一次
+#   3. 空间实在不够时，pattern 填 '*' 全量清理
+#
+# 触发方式：仓库 → Actions → 左侧「清理制品」→ 右侧 Run workflow
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      pattern:
+        description: '制品名匹配（glob，如 lifelog-v*、*-preview-*、* 全部）'
+        required: true
+        type: string
+        default: '*'
+      keep:
+        description: '保留最近几个（按创建时间倒序，0 = 全部删除）'
+        required: true
+        type: string
+        default: '3'
+      older_than:
+        description: '只清理 N 天前的；填 0 表示不限天数，只看 keep'
+        required: false
+        type: string
+        default: '0'
+      dry_run:
+        description: '预演模式：只列出要删的，不实际删除'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  actions: write      # 删除制品需要
+
+jobs:
+  cleanup:
+    name: 清理制品
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 配额打满时说明当前占用已经很高，先把账摊开：
+      # 按制品名汇总占用，一眼看出是谁在吃空间，再决定 pattern 怎么填。
+      - name: 当前占用概览
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "### 清理前：各制品占用" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          gh api --paginate "repos/$REPO/actions/artifacts" \
+            --jq '.artifacts[] | select(.expired==false)
+                  | "\(.name)\t\(.size_in_bytes)"' \
+          | awk -F'\t' '
+              { s[$1] += $2; n[$1] += 1 }
+              END {
+                for (k in s) printf "%8.1f MB  %3d 个  %s\n", s[k]/1048576, n[k], k
+              }' \
+          | sort -rn \
+          | tee /dev/stderr >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 执行清理
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS=(--pattern "${{ inputs.pattern }}"
+                --keep "${{ inputs.keep }}"
+                --older-than "${{ inputs.older_than }}"
+                --repo "${{ github.repository }}")
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          bash .github/scripts/cleanup-artifacts.sh "${ARGS[@]}"
+
+      - name: 清理后占用
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          TOTAL=$(gh api --paginate "repos/$REPO/actions/artifacts" \
+            --jq '[.artifacts[] | select(.expired==false) | .size_in_bytes] | add // 0')
+          MB=$(awk -v b="$TOTAL" 'BEGIN { printf "%.1f", b/1048576 }')
+          echo "清理后剩余总占用：**${MB} MB** / 500 MB（Free 计划配额）" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "剩余总占用：${MB} MB"

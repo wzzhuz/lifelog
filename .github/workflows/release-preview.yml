@@ -49,6 +49,7 @@ concurrency:
 # 不打 tag、不建 Release，因此**不需要** contents: write
 permissions:
   contents: read
+  actions: write      # 清理旧体验包需要
 
 jobs:
   preview:
@@ -139,9 +140,18 @@ jobs:
         with:
           name: lifelog-preview-${{ steps.ver.outputs.sha }}
           path: out/*.apk
-          # 临时验证包，没必要像正式 Release 那样存一年
-          retention-days: 30
+          # 体验包要长期留档做对比，但只留最新一个，见下一步的清理
+          retention-days: 90
           if-no-files-found: error
+
+      # 体验包按 commit sha 命名，天然不重名，会一直堆积。
+      # 只留最新一个：想对比时现场重新构建即可，不值得占着共享配额。
+      - name: 只保留最新 1 个体验包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/cleanup-artifacts.sh \
+            --pattern 'lifelog-preview-*' --keep 1
 
       - name: 输出摘要
         if: always()

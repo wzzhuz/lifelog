@@ -47,6 +47,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write      # 清理旧 Release 包需要
 
 jobs:
   release:
@@ -178,6 +179,15 @@ jobs:
           path: app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}
           retention-days: 90
           if-no-files-found: error
+
+      # 只留最近 5 个历史版本：回溯够用，又不至于把 500MB 共享配额吃光。
+      # 每个 APK 约 3~15MB，5 个封顶约 75MB。
+      - name: 只保留最近 5 个 Release APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/cleanup-artifacts.sh \
+            --pattern 'lifelog-v*' --keep 5
 
       - name: 上传 AAB
         if: inputs.build_aab

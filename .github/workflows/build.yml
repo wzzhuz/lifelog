@@ -18,6 +18,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write      # 清理旧制品需要；不显式声明会被置为 none
 
 jobs:
   build:
@@ -76,17 +77,26 @@ jobs:
           echo "sha256=$(sha256sum app-debug.apk | cut -d' ' -f1)" >> $GITHUB_OUTPUT
           echo "size=$(du -h app-debug.apk | cut -f1)" >> $GITHUB_OUTPUT
 
-      # 90 天太长：每次 push 产一个 20MB 的包，几天就把 GitHub Free 的 500MB
-      # 制品配额堆满，之后所有 upload-artifact 步骤都会被服务端直接拒绝
-      # （表现为「上传 APK 产物」1 秒内失败，而前面编译步骤全部成功）。
-      # 14 天足够回溯，配合 build.yml 的 concurrency 取消，稳态占用约 5 个包。
+      # 制品配额是账号级共享的 500MB（Free 计划），debug 包约 20MB 一个，
+      # 按天数保留会在高频 push 时迅速打满，之后所有上传步骤被服务端直接拒绝
+      # （表现为「上传」1 秒失败，而编译步骤全部成功，错误信息不提配额）。
+      # retention 设 1 天兜底，真正的控制交给后面的「只留最新 1 个」清理。
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
         with:
           name: 生活手记-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
+          retention-days: 1
           if-no-files-found: error
+
+      # 原生只支持按天数保留，做不到「只留最新 N 个」。
+      # debug 包每次 push 都会重建，留最新一个足够回溯，稳态占用固定在约 20MB。
+      - name: 只保留最新 1 个 debug 包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/cleanup-artifacts.sh \
+            --pattern '生活手记-debug-apk' --keep 1
 
       - name: 输出摘要
         run: |
