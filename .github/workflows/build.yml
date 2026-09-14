@@ -76,12 +76,16 @@ jobs:
           echo "sha256=$(sha256sum app-debug.apk | cut -d' ' -f1)" >> $GITHUB_OUTPUT
           echo "size=$(du -h app-debug.apk | cut -f1)" >> $GITHUB_OUTPUT
 
+      # 90 天太长：每次 push 产一个 20MB 的包，几天就把 GitHub Free 的 500MB
+      # 制品配额堆满，之后所有 upload-artifact 步骤都会被服务端直接拒绝
+      # （表现为「上传 APK 产物」1 秒内失败，而前面编译步骤全部成功）。
+      # 14 天足够回溯，配合 build.yml 的 concurrency 取消，稳态占用约 5 个包。
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
         with:
           name: 生活手记-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 90
+          retention-days: 14
           if-no-files-found: error
 
       - name: 输出摘要

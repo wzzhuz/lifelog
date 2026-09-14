@@ -176,7 +176,7 @@ jobs:
         with:
           name: ${{ steps.rename.outputs.apk_name }}
           path: app/build/outputs/apk/release/${{ steps.rename.outputs.apk_name }}
-          retention-days: 365
+          retention-days: 90
           if-no-files-found: error
 
       - name: 上传 AAB
@@ -185,7 +185,7 @@ jobs:
         with:
           name: lifelog-aab-${{ steps.ver.outputs.version }}
           path: app/build/outputs/bundle/release/app-release.aab
-          retention-days: 365
+          retention-days: 90
           if-no-files-found: error
 
       # ---------------------------------------------------------------
