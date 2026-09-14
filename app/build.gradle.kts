@@ -47,6 +47,16 @@ val useReleaseSigning = releaseStoreFile.isNotBlank()
     && releaseKeyAlias.isNotBlank()
     && releaseKeyPassword.isNotBlank()
 
+// 配置期打印一次实际生效的签名来源。
+// 「日志说用了正式密钥、实际回退 debug」排查起来非常费时，
+// 这里先显式声明；真正的判定仍以 APK 内证书 Owner 为准
+// （见各 workflow 的「校验签名信息」步骤）。
+if (useReleaseSigning) {
+    println("[签名] 使用正式密钥：$releaseStoreFile（alias=$releaseKeyAlias）")
+} else {
+    println("[签名] 未配置正式密钥，回退 app/debug.keystore（仅供自用测试，不建议对外分发）")
+}
+
 // release 构建是否开启 R8 混淆（默认关闭）
 // 关掉的原因：Glance 小组件依赖反射实例化，R8 容易误删导致运行时崩溃。
 // 想要开启：gradle assembleRelease -PminifyRelease=true
@@ -86,7 +96,14 @@ android {
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("commonDebug")
+            // 与 release 同策略：配了正式密钥就用它，没配才回退 debug.keystore。
+            // 这样 CI 产出的 debug 包 / 体验包 / 正式包签名统一，可互相覆盖安装；
+            // 本地配了 keystore.properties 时同样生效。
+            signingConfig = if (useReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("commonDebug")
+            }
             applicationIdSuffix = null
             isMinifyEnabled = false
         }

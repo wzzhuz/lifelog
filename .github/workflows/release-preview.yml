@@ -86,6 +86,7 @@ jobs:
       # 缺 Secret 时回退 debug，随后的「校验签名信息」会直接中断构建。
       # ---------------------------------------------------------------
       - name: 准备签名密钥
+        id: signing
         run: bash .github/scripts/prepare-signing.sh >> "$GITHUB_ENV"
         env:
           RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}

@@ -24,6 +24,10 @@ set -euo pipefail
 
 log() { echo "$*" >&2; }
 
+# 供后续步骤判断是否用上了正式密钥（写进 $GITHUB_OUTPUT）。
+# 不用 `if: env.X` 判断：GITHUB_ENV 注入的变量在 if 表达式里求值时机不稳。
+emit() { [ -n "${GITHUB_OUTPUT:-}" ] && echo "$1" >> "$GITHUB_OUTPUT"; }
+
 MISSING=""
 [ -n "${RELEASE_KEYSTORE_B64:-}" ] || MISSING="$MISSING RELEASE_KEYSTORE_BASE64"
 [ -n "${STORE_PW:-}" ]            || MISSING="$MISSING KEYSTORE_PASSWORD"
@@ -34,6 +38,7 @@ if [ -n "$MISSING" ]; then
   log "⚠️  缺少 Secret:$MISSING"
   log "   → 将回退使用仓库内的 debug.keystore（仅供自用测试，不建议对外分发）"
   log "   补齐路径：Settings → Secrets and variables → Actions → Repository secrets"
+  emit "using_release=false"
   exit 0
 fi
 
@@ -45,10 +50,12 @@ KS_FILE="$KS_DIR/lifelog-release.keystore"
 if ! echo "$RELEASE_KEYSTORE_B64" | base64 -d > "$KS_FILE" 2>/dev/null; then
   log "❌ keystore base64 解码失败：RELEASE_KEYSTORE_BASE64 内容不是合法的 base64"
   log "   → 将回退 debug 签名。请重新生成：base64 -w 0 lifelog-release.keystore"
+  emit "using_release=false"
   exit 0
 fi
 if [ ! -s "$KS_FILE" ]; then
   log "❌ 解码后 keystore 为空文件"
+  emit "using_release=false"
   exit 0
 fi
 
@@ -64,6 +71,8 @@ if [ "$STORE_PW" != "$KEY_PW" ]; then
   log "   PKCS12 私钥即用 storepass 加密，两者必须相同，"
   log "   否则签名阶段会失败：Cannot recover key / keystore password was incorrect"
 fi
+
+emit "using_release=true"
 
 # 只有这 4 行走 stdout，供调用方追加进 $GITHUB_ENV
 echo "LIFELOG_KEYSTORE_FILE=$KS_FILE"
