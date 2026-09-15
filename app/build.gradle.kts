@@ -12,6 +12,45 @@ plugins {
 }
 
 // ---------------------------------------------------------------------------
+// 版本号
+//
+// 唯一手动维护点：defaultVersionName。发版时改这里。
+//
+// CI 可用 -PversionNameOverride=1.0.2 临时覆盖，但**不会回写文件** ——
+// 此前 Release 标题写着 v1.0.2、APK 内却是 1.0.0，就是因为这个：
+// 版本号只在 workflow 里被算出来用于「文件改名 + Release 标题」，
+// 编译步骤根本没传给 Gradle，APK 里装的永远是文件里的值。
+//
+// versionCode 由版本名推导：major*10000 + minor*100 + patch（1.0.2 → 10002）。
+// 此前恒为 1，导致所有版本 versionCode 相同，系统无法判断新旧，
+// 覆盖安装不走升级路径，将来上架或自动更新也会失效。
+// ---------------------------------------------------------------------------
+val defaultVersionName = "1.0.0"
+
+fun versionCodeFrom(name: String): Int {
+    val nums = Regex("""\d+""").findAll(name).map { it.value.toInt() }.toList()
+    val major = nums.getOrNull(0) ?: 1
+    val minor = nums.getOrNull(1) ?: 0
+    val patch = nums.getOrNull(2) ?: 0
+    return major * 10000 + minor * 100 + patch
+}
+
+val versionNameValue =
+    (project.findProperty("versionNameOverride") as String?)?.takeIf { it.isNotBlank() }
+        ?: defaultVersionName
+val versionCodeValue =
+    (project.findProperty("versionCodeOverride") as String?)?.toIntOrNull()
+        ?: versionCodeFrom(versionNameValue)
+
+// 覆盖值时显式提示：文件与产物不一致迟早会再踩一次坑
+if (versionNameValue != defaultVersionName) {
+    println("[版本] ⚠️  CI 覆盖为 $versionNameValue（versionCode=$versionCodeValue），"
+        + "文件里仍是 \"$defaultVersionName\"，发版后请同步修改 defaultVersionName")
+} else {
+    println("[版本] $versionNameValue（versionCode=$versionCodeValue）")
+}
+
+// ---------------------------------------------------------------------------
 // 签名配置解析
 //
 // 优先级：环境变量 > keystore.properties > 无（回退 debug 签名）
@@ -71,8 +110,8 @@ android {
         applicationId = "com.zwz.lifelog"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = versionCodeValue
+        versionName = versionNameValue
     }
 
     signingConfigs {

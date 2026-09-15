@@ -98,31 +98,56 @@ jobs:
           KEY_ALIAS_V:          ${{ secrets.KEY_ALIAS }}
           KEY_PW:               ${{ secrets.KEY_PASSWORD }}
 
+      # 版本号必须**传给 Gradle**，否则只作用于文件名和 Release 标题，
+      # APK 内仍是 build.gradle.kts 里的值 —— 此前 v1.0.2 的包装上去显示 1.0.0。
       - name: 确定版本号
         id: ver
         run: |
           if [ -n "${{ inputs.version_name }}" ]; then
             V="${{ inputs.version_name }}"
           else
-            V=$(grep -m1 -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+            # 注意 grep 的是 defaultVersionName：文件里已改成变量赋值，
+            # 再 grep `versionName = "..."` 会匹配不到。
+            V=$(grep -m1 -oP 'val defaultVersionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
           fi
           V="${V#v}"
+
+          # versionCode 由版本名推导，与 build.gradle.kts 的 versionCodeFrom() 同规则：
+          # major*10000 + minor*100 + patch。必须递增，否则系统判不出新旧。
+          MAJOR=$(echo "$V" | grep -oP '^\d+' || echo 1)
+          MINOR=$(echo "$V" | grep -oP '^\d+\.\K\d+' || echo 0)
+          PATCH=$(echo "$V" | grep -oP '^\d+\.\d+\.\K\d+' || echo 0)
+          C=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+
           echo "version=$V" >> $GITHUB_OUTPUT
-          echo "版本号: $V"
+          echo "code=$C"      >> $GITHUB_OUTPUT
+          echo "版本号: $V（versionCode: $C）"
+
+          FILE_V=$(grep -m1 -oP 'val defaultVersionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          if [ "$V" != "$FILE_V" ]; then
+            echo "::warning::CI 覆盖了版本号为 $V，但文件里仍是 $FILE_V，发版后请同步修改 defaultVersionName"
+          fi
 
       # 注意：release 构建会跑 lintVital，fatal 级 Lint 错误会中断构建。
       # debug 构建不跑这个检查，所以本地和 CI 的 debug 都发现不了。
       - name: 编译 Release APK
         run: |
           if [ "${{ inputs.minify }}" = "true" ]; then
-            gradle assembleRelease -PminifyRelease=true --stacktrace --no-daemon
+            gradle assembleRelease -PminifyRelease=true --stacktrace --no-daemon \
+              -PversionNameOverride="${{ steps.ver.outputs.version }}" \
+              -PversionCodeOverride="${{ steps.ver.outputs.code }}"
           else
-            gradle assembleRelease --stacktrace --no-daemon
+            gradle assembleRelease --stacktrace --no-daemon \
+              -PversionNameOverride="${{ steps.ver.outputs.version }}" \
+              -PversionCodeOverride="${{ steps.ver.outputs.code }}"
           fi
 
       - name: 编译 AAB
         if: inputs.build_aab
-        run: gradle bundleRelease --stacktrace --no-daemon
+        run: |
+          gradle bundleRelease --stacktrace --no-daemon \
+            -PversionNameOverride="${{ steps.ver.outputs.version }}" \
+            -PversionCodeOverride="${{ steps.ver.outputs.code }}"
 
       - name: 重命名产物
         id: rename

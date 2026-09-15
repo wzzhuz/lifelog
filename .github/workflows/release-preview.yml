@@ -97,19 +97,31 @@ jobs:
       - name: 取版本标识
         id: ver
         run: |
-          V=$(grep -m1 -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          # grep defaultVersionName：文件里已改成变量赋值，
+          # 再 grep `versionName = "..."` 会匹配不到。
+          V=$(grep -m1 -oP 'val defaultVersionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+
+          # versionCode 与 build.gradle.kts 的 versionCodeFrom() 同规则
+          MAJOR=$(echo "$V" | grep -oP '^\d+' || echo 1)
+          MINOR=$(echo "$V" | grep -oP '^\d+\.\K\d+' || echo 0)
+          PATCH=$(echo "$V" | grep -oP '^\d+\.\d+\.\K\d+' || echo 0)
+          C=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+
           SHA=$(git rev-parse --short=7 HEAD)
           BR=$(echo "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '_')
           echo "version=$V" >> $GITHUB_OUTPUT
+          echo "code=$C"     >> $GITHUB_OUTPUT
           echo "sha=$SHA" >> $GITHUB_OUTPUT
           echo "branch=$BR" >> $GITHUB_OUTPUT
-          echo "版本 $V · commit $SHA · 分支 $BR"
+          echo "版本 $V（versionCode $C）· commit $SHA · 分支 $BR"
 
       # 不混淆的包：与 debug 构建的唯一差别就是去掉调试开销
       - name: 编译（不混淆）
         if: inputs.minify == 'none' || inputs.minify == 'both'
         run: |
           gradle assembleRelease --stacktrace --no-daemon \
+            -PversionNameOverride="${{ steps.ver.outputs.version }}" \
+            -PversionCodeOverride="${{ steps.ver.outputs.code }}" \
             $( [ "${{ inputs.lint }}" = "true" ] || echo "-x lintVitalRelease" )
           mkdir -p out
           # 文件名纯 ASCII：GitHub 资产接口不支持非 ASCII，中文会被静默丢弃
@@ -122,6 +134,8 @@ jobs:
         if: inputs.minify == 'on' || inputs.minify == 'both'
         run: |
           gradle assembleRelease -PminifyRelease=true --stacktrace --no-daemon \
+            -PversionNameOverride="${{ steps.ver.outputs.version }}" \
+            -PversionCodeOverride="${{ steps.ver.outputs.code }}" \
             $( [ "${{ inputs.lint }}" = "true" ] || echo "-x lintVitalRelease" )
           mkdir -p out
           cp app/build/outputs/apk/release/app-release.apk \
