@@ -1,5 +1,6 @@
 package com.zwz.lifelog.ui.list
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +56,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -80,6 +82,8 @@ fun ListScreen(
     vm: ListViewModel,
     onOpenDetail: (Long) -> Unit,
     onCreateEvent: () -> Unit,
+    /** 走「开疗程」路径：独立模板选择页。 */
+    onCreateCourse: () -> Unit,
     onOpenTimeline: () -> Unit,
     onOpenSettings: () -> Unit,
     onDataChanged: () -> Unit,
@@ -95,6 +99,9 @@ fun ListScreen(
         HomeLayoutMode.COMPACT -> CardDensity.COMPACT
         HomeLayoutMode.COMFORT -> CardDensity.COMFORT
     }
+    // 新建走「选路径」而不是直接进表单：
+    // 记件事与开疗程是两件完全不同的事，挤在一张表单里两边都复杂
+    var showCreatePicker by remember { mutableStateOf(false) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
@@ -116,11 +123,11 @@ fun ListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = onCreateEvent,
+                onClick = { showCreatePicker = true },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
-                Icon(Icons.Default.Add, contentDescription = "新建事件")
+                Icon(Icons.Default.Add, contentDescription = "新建")
             }
         }
     ) { pad ->
@@ -312,6 +319,17 @@ fun ListScreen(
         }
     }
 
+    // 新建入口：先选路径。
+    // 必须放在 showTemplatePicker 判断**之外**——曾误插进那个 if 里，
+    // 结果条件为 false 时整块都不执行，点 FAB 毫无反应。
+    if (showCreatePicker) {
+        CreatePathSheet(
+            onDismiss = { showCreatePicker = false },
+            onNote = { showCreatePicker = false; onCreateEvent() },
+            onCourse = { showCreatePicker = false; onCreateCourse() }
+        )
+    }
+
     if (state.showTemplatePicker) {
         TemplateSheet(vm = vm, onDone = { n ->
             onDataChanged()
@@ -381,6 +399,84 @@ private fun EmptyState(hasData: Boolean, onPickTemplate: () -> Unit) {
             )
             Spacer(Modifier.height(16.dp))
             Button(onClick = onPickTemplate) { Text("从模板导入") }
+        }
+    }
+}
+
+/**
+ * 新建入口：先选路径。
+ *
+ * 记一件事只要填名字；开疗程要选场景、看子项建议、再进疗程页加药。
+ * 两者挤在一张表单里，结果是记件普通事也要先看过 4 个疗程模板。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CreatePathSheet(
+    onDismiss: () -> Unit,
+    onNote: () -> Unit,
+    onCourse: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                "要做什么",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            PathRow(
+                emoji = "\uD83D\uDCCC",
+                title = "记一件事",
+                subtitle = "理发、换床单这类，只填名字就行",
+                onClick = onNote
+            )
+            Spacer(Modifier.height(10.dp))
+            PathRow(
+                emoji = "\uD83C\uDFE5",
+                title = "开一个疗程",
+                subtitle = "感冒、术后恢复这类，选场景后加药",
+                onClick = onCourse
+            )
+        }
+    }
+}
+
+@Composable
+private fun PathRow(
+    emoji: String,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center
+        ) { Text(emoji, style = MaterialTheme.typography.titleMedium) }
+        Spacer(Modifier.size(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

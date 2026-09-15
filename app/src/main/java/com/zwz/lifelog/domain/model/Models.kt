@@ -220,6 +220,70 @@ data class Template(
     val kind: EventKind = EventKind.PERIODIC
 )
 
+/**
+ * 子项建议：疗程里通常要记的那些项。
+ *
+ * 三种形态用**两个显式字段**区分，而不是让一个数字兼职：
+ * - [timesPerDay] 非空 → 频次型（退烧药 3/日）
+ * - [periodDays] 非空  → 周期型（复查 每 7 天）
+ * - 两者都空           → 一次性（拆线），按需型
+ *
+ * 早期版本让 `targetDays` 既表示「每日几次」又表示「间隔几天」，
+ * 语义全靠上下文猜，极易写反。这里拆开，编译器就能挡住一部分错。
+ *
+ * @param scene 场景分组，既用于疗程模板取子集，也用于编辑页分区展示
+ */
+data class ChildSuggestion(
+    val name: String,
+    val emoji: String,
+    val timesPerDay: Int? = null,
+    val periodDays: Int? = null,
+    val scene: String = "通用"
+) {
+    val kind: EventKind
+        get() = when {
+            timesPerDay != null -> EventKind.PERIODIC
+            periodDays != null -> EventKind.PERIODIC
+            else -> EventKind.ON_DEMAND
+        }
+
+    /** chip 上的补充文案。一次性子项没有数字，只显示名字。 */
+    val hintText: String
+        get() = when {
+            timesPerDay != null -> " · $timesPerDay/日"
+            periodDays != null -> " · 每 $periodDays 天"
+            else -> ""
+        }
+}
+
+/**
+ * 疗程模板：打包好除「名称」外的一切。
+ *
+ * 与 [Template]（长期事件模板）的区别：
+ * - 长期事件模板只填事件本身；疗程模板还带**子项建议**
+ * - 长期事件模板按名去重；疗程模板**允许重复创建**
+ *   （第二次感冒还要能再建一个「感冒 9月11日」）
+ *
+ * @param children 该场景常用子项。只作建议呈现，**不会自动创建**——
+ *                 每个人的处方不同，擅自替用户决定吃哪种药比让他多点一下更糟
+ */
+data class CourseTemplate(
+    val namePrefix: String,
+    val emoji: String,
+    val colorArgb: Int,
+    val tag: String,
+    val hint: String,
+    val children: List<ChildSuggestion>,
+    /**
+     * 自定义模板：场景写死的那几个覆盖不到时（胆结石、运动受伤…）用它。
+     *
+     * 与普通模板的区别只有两点：
+     * - 名字**不预填**，让用户自己起
+     * - 没有常用项建议，添加子事件时回退为全部分组，用户自己输入
+     */
+    val custom: Boolean = false
+)
+
 object Templates {
     val ALL = listOf(
         Template("理发", "\u2702\uFE0F", 35, "个人"),
@@ -266,22 +330,128 @@ object Templates {
         Template("一起看电影", "\uD83C\uDFAC", 30, "夫妻")
     )
 
+    // ------------------------------------------------------------------
+    // 子项建议
+    //
+    // 按场景分组。分组既用于疗程模板取子集，也用于编辑页分区展示：
+    // 宠物疗程不该看到「退烧药」，感冒疗程不该看到「体外驱虫」。
+    // ------------------------------------------------------------------
+
+    private val S_FEVER = ChildSuggestion("退烧药", "\uD83D\uDC8A", timesPerDay = 3, scene = "感冒")
+    private val S_COUGH = ChildSuggestion("止咳糖浆", "\uD83E\uDDF4", timesPerDay = 3, scene = "感冒")
+    private val S_COLD = ChildSuggestion("感冒冲剂", "\uD83C\uDF75", timesPerDay = 3, scene = "感冒")
+    private val S_ANTI = ChildSuggestion("消炎药", "\uD83D\uDC8A", timesPerDay = 2, scene = "感冒")
+    private val S_NEB = ChildSuggestion("雾化", "\uD83D\uDCA8", timesPerDay = 2, scene = "感冒")
+
+    private val S_DRESSING = ChildSuggestion("换药", "\uD83E\uDDFA", timesPerDay = 2, scene = "术后恢复")
+    private val S_STITCH = ChildSuggestion("拆线", "\u2702\uFE0F", scene = "术后恢复")
+    private val S_RECHECK = ChildSuggestion("复查", "\uD83C\uDFE5", periodDays = 7, scene = "术后恢复")
+    private val S_PAIN = ChildSuggestion("止痛药", "\uD83D\uDC8A", timesPerDay = 3, scene = "术后恢复")
+
+    private val S_INNER = ChildSuggestion("体内驱虫", "\uD83D\uDC8A", periodDays = 30, scene = "宠物")
+    private val S_OUTER = ChildSuggestion("体外驱虫", "\uD83E\uDDF4", periodDays = 30, scene = "宠物")
+    private val S_VACCINE = ChildSuggestion("疫苗", "\uD83D\uDC89", periodDays = 21, scene = "宠物")
+
+    private val S_HERB = ChildSuggestion("中药", "\uD83C\uDF75", timesPerDay = 2, scene = "调理")
+    private val S_ACU = ChildSuggestion("针灸", "\uD83E\uDEA8", periodDays = 7, scene = "调理")
+
+    private val S_VITAMIN = ChildSuggestion("维生素", "\uD83C\uDF7A", timesPerDay = 1, scene = "通用")
+    private val S_EYEDROP = ChildSuggestion("眼药水", "\uD83D\uDC41\uFE0F", timesPerDay = 3, scene = "通用")
+    private val S_OINTMENT = ChildSuggestion("外用药膏", "\uD83E\uDDF4", timesPerDay = 2, scene = "通用")
+
     /**
-     * 用药 / 子事件预设，在疗程详情页「添加子事件」时以快捷 chip 呈现。
+     * 全部子项建议，在疗程详情页「添加子事件」时以快捷 chip 呈现。
      *
      * 与 [ALL] 的区别有两点：
      * 1. **允许重复添加** —— 第二次感冒还要能再加一个「退烧药」
-     * 2. 带默认每日次数（[Template.targetDays] 复用为该次数），
-     *    加进来就能用，不必再填一遍
+     * 2. 带默认频次/周期，加进来就能用，不必再填一遍
      */
-    val CHILD_PRESETS = listOf(
-        Template("退烧药", "\uD83D\uDC8A", 3, "健康"),
-        Template("消炎药", "\uD83D\uDC8A", 2, "健康"),
-        Template("止咳糖浆", "\uD83E\uDDF4", 3, "健康"),
-        Template("感冒冲剂", "\uD83C\uDF75", 3, "健康"),
-        Template("外用药膏", "\uD83E\uDDF4", 2, "健康"),
-        Template("维生素", "\uD83C\uDF7A", 1, "健康"),
-        Template("眼药水", "\uD83D\uDC41\uFE0F", 3, "健康"),
-        Template("雾化", "\uD83D\uDCA8", 2, "健康")
+    val CHILD_PRESETS: List<ChildSuggestion> = listOf(
+        S_FEVER, S_COUGH, S_COLD, S_ANTI, S_NEB,
+        S_DRESSING, S_STITCH, S_RECHECK, S_PAIN,
+        S_INNER, S_OUTER, S_VACCINE,
+        S_HERB, S_ACU,
+        S_VITAMIN, S_EYEDROP, S_OINTMENT
+    )
+
+    /** 子项建议按场景分组，编辑页用它分区展示。 */
+    fun childPresetsByScene(): List<Pair<String, List<ChildSuggestion>>> =
+        CHILD_PRESETS.groupBy { it.scene }.toList()
+
+    /**
+     * 按疗程名反查它来自哪个模板，如「感冒 9月11日」→ 感冒模板。
+     *
+     * 用途：添加子事件时只显示该场景的 3~4 个预设，而不是全部 17 个——
+     * 用上下文替代穷举，疗程本来就「知道」自己是什么事。
+     *
+     * 匹配不到时（手动建的疗程、用户改过名字）返回 null，
+     * 调用方回退为展示全部分组，不会因此没法添加。
+     */
+    fun templateForCourseName(name: String?): CourseTemplate? {
+        val n = name?.trim() ?: return null
+        // 长前缀优先：「中医调理」要先于「中医」被匹配到
+        return COURSE_TEMPLATES
+            .filter { n.startsWith(it.namePrefix) }
+            .maxByOrNull { it.namePrefix.length }
+    }
+
+    /**
+     * 疗程模板。
+     *
+     * 每个模板把「这次是什么事」所需的图标、颜色、分类、类型一次填好，
+     * 用户只需确认名字（系统按前缀 + 日期预填）。
+     *
+     * 颜色取自 [com.zwz.lifelog.ui.edit.EditViewModel.PALETTE]，
+     * 保证模板色与手动挑色的取值范围一致。
+     *
+     **为什么只有四个**：疗程场景要求「有明确终点 + 多项不同节奏 +
+     * 关心整体进度」，满足的本来就不多。装修、备考、健身都不满足
+     * （见 change 的 proposal），做进来会把疗程页拖成待办清单。
+     * 自定义模板不做——加一个场景只是几行数据，成本远低于维护一套
+     * 模板管理界面。
+     */
+    val COURSE_TEMPLATES: List<CourseTemplate> = listOf(
+        CourseTemplate(
+            namePrefix = "感冒",
+            emoji = "\uD83C\uDFE5",
+            colorArgb = 0xFFE5484D.toInt(),
+            tag = "健康",
+            hint = "发烧咳嗽这几天",
+            children = listOf(S_FEVER, S_COUGH, S_COLD, S_ANTI)
+        ),
+        CourseTemplate(
+            namePrefix = "术后恢复",
+            emoji = "\uD83E\uDE79",
+            colorArgb = 0xFF2F6FED.toInt(),
+            tag = "健康",
+            hint = "换药、拆线、复查",
+            children = listOf(S_DRESSING, S_STITCH, S_RECHECK, S_PAIN)
+        ),
+        CourseTemplate(
+            namePrefix = "宠物驱虫",
+            emoji = "\uD83D\uDC3E",
+            colorArgb = 0xFFE08C00.toInt(),
+            tag = "宠物",
+            hint = "体内体外分开记，疫苗按针次",
+            children = listOf(S_INNER, S_OUTER, S_VACCINE)
+        ),
+        CourseTemplate(
+            namePrefix = "中医调理",
+            emoji = "\uD83C\uDF75",
+            colorArgb = 0xFF16A34A.toInt(),
+            tag = "健康",
+            hint = "喝药加针灸的一段周期",
+            children = listOf(S_HERB, S_ACU)
+        ),
+        CourseTemplate(
+            namePrefix = "其他",
+            emoji = "\uD83D\uDD25",
+            colorArgb = 0xFF64748B.toInt(),
+            tag = "健康",
+            hint = "上面没有的场景，自己起名字",
+            children = emptyList(),
+            custom = true
+        )
+
     )
 }

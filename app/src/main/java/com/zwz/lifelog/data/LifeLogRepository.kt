@@ -553,6 +553,20 @@ class LifeLogRepository(private val context: Context) {
         )
     }
 
+    /**
+     * 生成一个不与既有疗程重名的名字。
+     *
+     * 同一天第二次感冒会撞名（「感冒 9月11日」），追加序号区分。
+     * **含已归档**一起查：归档页里出现两个一模一样的名字同样难分辨。
+     */
+    suspend fun uniqueCourseName(base: String): String = withContext(Dispatchers.IO) {
+        val taken = dao.allEvents().map { it.name }.toSet()
+        if (base !in taken) return@withContext base
+        var n = 2
+        while ("$base · $n" in taken) n++
+        "$base · $n"
+    }
+
     suspend fun upsertEvent(event: Event): Long = withContext(Dispatchers.IO) {
         if (event.id == 0L) {
             dao.upsertEvent(event.copy(createdAt = System.currentTimeMillis()).toEntity())

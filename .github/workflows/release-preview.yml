@@ -49,7 +49,6 @@ concurrency:
 # 不打 tag、不建 Release，因此**不需要** contents: write
 permissions:
   contents: read
-  actions: write      # 清理旧体验包需要
 
 jobs:
   preview:
@@ -75,53 +74,41 @@ jobs:
           gradle-version: '8.13'
 
       # ---------------------------------------------------------------
-      # 签名：与「编译 Release 包」共用同一份正式密钥
+      # 签名：刻意**不读** RELEASE_KEYSTORE_BASE64，固定回退 debug.keystore
       #
-      # 此前这里刻意回退 debug.keystore，理由是体验包能直接覆盖手机上的
-      # debug 试用装（签名不同就必须先卸载，而卸载会清掉全部记录）。
-      # 现在正式包已经用正式密钥签名，若体验包仍是 debug 签名，两者反而
-      # 无法互相覆盖 —— 所以统一成正式密钥，与 release.yml 保持同签名。
+      # 这不是偷懒，是刻意的取舍：
+      # 1. 体验包要能直接覆盖手机上正在用的 debug 试用装。
+      #    两者签名不同就必须先卸载，而卸载会**清掉全部记录**——
+      #    试个手感把数据弄没了，代价太大。
+      # 2. 反正是自用临时包，不需要正式密钥的那点安全性。
       #
-      # 逻辑与 release.yml 完全一致（共用 prepare-signing.sh），
-      # 缺 Secret 时回退 debug，随后的「校验签名信息」会直接中断构建。
+      # 代价：这类包不能对外分发（密钥是公开的）。
       # ---------------------------------------------------------------
-      - name: 准备签名密钥
-        id: signing
-        run: bash .github/scripts/prepare-signing.sh >> "$GITHUB_ENV"
-        env:
-          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          STORE_PW:             ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS_V:          ${{ secrets.KEY_ALIAS }}
-          KEY_PW:               ${{ secrets.KEY_PASSWORD }}
+      - name: 确认使用 debug 签名（保证可覆盖现有试用装）
+        run: |
+          test -f app/debug.keystore \
+            || { echo "❌ 找不到 app/debug.keystore"; exit 1; }
+          echo "✅ 使用仓库内 debug.keystore 签名"
+          echo "   与现有 debug 试用装同签名，可直接覆盖安装，不会丢数据"
 
       - name: 取版本标识
         id: ver
         run: |
-          # grep defaultVersionName：文件里已改成变量赋值，
-          # 再 grep `versionName = "..."` 会匹配不到。
-          V=$(grep -m1 -oP 'val defaultVersionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
-
-          # versionCode 与 build.gradle.kts 的 versionCodeFrom() 同规则
-          MAJOR=$(echo "$V" | grep -oP '^\d+' || echo 1)
-          MINOR=$(echo "$V" | grep -oP '^\d+\.\K\d+' || echo 0)
-          PATCH=$(echo "$V" | grep -oP '^\d+\.\d+\.\K\d+' || echo 0)
-          C=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
-
+          # 用 python 提取而不是 `grep -oP`：-P 依赖 PCRE 编译选项，
+          # 换机器/换镜像就可能不支持，而这一步失败会让整个流程空跑
+          V=$(python3 -c 'import re,sys;m=re.search(r"versionName\\s*=\\s*\"([^\"]+)\"",open("app/build.gradle.kts").read());print(m.group(1) if m else "0.0.0")')
           SHA=$(git rev-parse --short=7 HEAD)
           BR=$(echo "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '_')
           echo "version=$V" >> $GITHUB_OUTPUT
-          echo "code=$C"     >> $GITHUB_OUTPUT
           echo "sha=$SHA" >> $GITHUB_OUTPUT
           echo "branch=$BR" >> $GITHUB_OUTPUT
-          echo "版本 $V（versionCode $C）· commit $SHA · 分支 $BR"
+          echo "版本 $V · commit $SHA · 分支 $BR"
 
       # 不混淆的包：与 debug 构建的唯一差别就是去掉调试开销
       - name: 编译（不混淆）
         if: inputs.minify == 'none' || inputs.minify == 'both'
         run: |
           gradle assembleRelease --stacktrace --no-daemon \
-            -PversionNameOverride="${{ steps.ver.outputs.version }}" \
-            -PversionCodeOverride="${{ steps.ver.outputs.code }}" \
             $( [ "${{ inputs.lint }}" = "true" ] || echo "-x lintVitalRelease" )
           mkdir -p out
           # 文件名纯 ASCII：GitHub 资产接口不支持非 ASCII，中文会被静默丢弃
@@ -134,34 +121,10 @@ jobs:
         if: inputs.minify == 'on' || inputs.minify == 'both'
         run: |
           gradle assembleRelease -PminifyRelease=true --stacktrace --no-daemon \
-            -PversionNameOverride="${{ steps.ver.outputs.version }}" \
-            -PversionCodeOverride="${{ steps.ver.outputs.code }}" \
             $( [ "${{ inputs.lint }}" = "true" ] || echo "-x lintVitalRelease" )
           mkdir -p out
           cp app/build/outputs/apk/release/app-release.apk \
              "out/lifelog-preview-${{ steps.ver.outputs.sha }}-minified.apk"
-
-      # 不能只信日志里的「✅ 使用正式密钥」：那是准备步骤自己打印的。
-      # 真正的判定看 APK 里证书的 Owner —— debug.keystore 是 CN=LifeLog Debug，
-      # 命中即中断，避免把 debug 签名的体验包当成正式包发出去。
-      - name: 校验签名信息
-        run: |
-          BAD=0
-          for f in out/*.apk; do
-            [ -e "$f" ] || { echo "❌ out/ 下没有 APK"; exit 1; }
-            echo "--- $f"
-            keytool -printcert -jarfile "$f" | tee /tmp/cert.txt
-            if grep -q "LifeLog Debug" /tmp/cert.txt; then
-              echo "❌ $f 仍是 debug 签名（CN=LifeLog Debug），正式密钥未生效"
-              BAD=1
-            fi
-          done
-          [ "$BAD" = "0" ] || {
-            echo ""
-            echo "请检查 4 个 Secret 是否齐全、KEY_PASSWORD 是否与 KEYSTORE_PASSWORD 一致"
-            exit 1
-          }
-          echo "✅ 已使用正式密钥签名"
 
       - name: 列出产物
         id: list
@@ -174,38 +137,13 @@ jobs:
           done | tee /tmp/summary.md
 
       - name: 上传体验包
-        id: upload_preview
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: lifelog-preview-${{ steps.ver.outputs.sha }}
           path: out/*.apk
-          # 体验包要长期留档做对比，但只留最新一个，见下一步的清理
-          retention-days: 90
+          # 临时验证包，没必要像正式 Release 那样存一年
+          retention-days: 30
           if-no-files-found: error
-
-      # continue-on-error 会把失败步骤显示成成功（conclusion=success 而
-      # outcome=failure），不显式告警就会出现「流水线全绿但拿不到包」。
-      - name: 制品上传失败告警
-        if: steps.upload_preview.outcome == 'failure'
-        run: |
-          echo "### ⚠️ 体验包未上传到 Actions 制品" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "APK 已编译并用正式密钥签名，仅上传失败，无法在 Artifacts 下载。" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "常见原因是账号级存储配额打满（Free 计划 500MB，所有仓库共享，\" >> "$GITHUB_STEP_SUMMARY"
-          echo "还与 Packages 共用）。可用「清理制品」workflow 全量清理，\" >> "$GITHUB_STEP_SUMMARY"
-          echo "或到 Settings → Billing 设置 Actions 预算立即解除。" >> "$GITHUB_STEP_SUMMARY"
-
-      # 体验包按 commit sha 命名，天然不重名，会一直堆积。
-      # 只留最新一个：想对比时现场重新构建即可，不值得占着共享配额。
-      - name: 只保留最新 1 个体验包
-        if: steps.upload_preview.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          bash .github/scripts/cleanup-artifacts.sh \
-            --pattern 'lifelog-preview-*' --keep 1
 
       - name: 输出摘要
         if: always()
@@ -225,10 +163,8 @@ jobs:
             echo "**与调试版的区别**"
             echo "- 无调试开销、无即时编译负担，启动与页面切换的体感才接近真实"
             echo "- 会跑 lintVital（fatal 级 Lint 错误会中断构建，调试版发现不了）"
-            echo "- 使用与正式 Release 相同的专用密钥签名"
-            echo "  → 与正式版同签名，可直接覆盖安装，不会丢数据"
-            echo "  → 若手机上装的还是早期的 debug 签名版本，**需先卸载**"
-            echo "     （卸载会清数据，请先导出 ZIP 备份）"
+            echo "- 用仓库内 debug 密钥签名，与现在手机上的试用装同签名"
+            echo "  → **可直接覆盖安装，不会丢数据**"
             echo ""
             echo "**没做的事**：没有打 tag、没有建 Release、没有占用版本号、"
             echo "没有上传坚果云。想要正式发布时请改用「编译 Release 包」。"
