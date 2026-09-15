@@ -27,6 +27,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -109,11 +112,22 @@ private fun CompactCard(
 ) {
     val isChild = status.event.parentId != null
     val cardHeight = if (isChild) 48.dp else 58.dp
+    val lineColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            // 子事件缩进：与父卡片错开一档，一眼看出是下一层
-            .then(if (isChild) Modifier.padding(start = 20.dp) else Modifier)
+            // 子事件缩进 + 左侧引导线：光靠缩进在滚动时不够醒目，
+            // 加一条竖线把「属于上面那个疗程」这件事画出来
+            .then(
+                if (isChild) Modifier.padding(start = 26.dp).drawBehind {
+                    drawLine(
+                        color = lineColor,
+                        start = Offset(0f, 0f),
+                        end = Offset(0f, size.height),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                } else Modifier
+            )
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),

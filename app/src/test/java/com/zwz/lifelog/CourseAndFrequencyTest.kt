@@ -235,7 +235,14 @@ class CourseAndFrequencyTest {
         assertTrue(Templates.ALL.none { it.name == "吃药" })
         val presets = Templates.CHILD_PRESETS
         assertTrue(presets.isNotEmpty())
-        presets.forEach { assertNotNull("预设 ${it.name} 缺每日次数", it.targetDays) }
+        presets.forEach { p ->
+            // 三种形态都合法，这里只校验字段本身没写坏：
+            // 频次与周期**不能同时有**（语义互斥），名字与图标不能空
+            assertFalse("预设 ${p.name} 同时有频次和周期，语义冲突",
+                p.timesPerDay != null && p.periodDays != null)
+            assertTrue("预设 ${p.name} 缺名字", p.name.isNotBlank())
+            assertTrue("预设 ${p.name} 缺图标", p.emoji.isNotBlank())
+        }
     }
 
     // ---------- 首页：子事件与父事件层级 ----------
@@ -247,5 +254,83 @@ class CourseAndFrequencyTest {
         assertTrue(child.isChild)
         assertFalse(parent.isChild)
         assertTrue(parent.isCourse)
+    }
+
+    // ---------- 疗程模板 ----------
+
+    @Test
+    fun `疗程模板覆盖多个场景且各自带子项建议`() {
+        val ts = Templates.COURSE_TEMPLATES
+        assertTrue(ts.size >= 3)
+        ts.forEach { t ->
+            // 「其他」是自定义模板，故意不带子项建议（让用户自己填）
+            if (!t.custom) {
+                assertTrue("模板 ${t.namePrefix} 没有子项建议", t.children.isNotEmpty())
+            }
+            assertTrue("模板 ${t.namePrefix} 分类为空", t.tag.isNotBlank())
+        }
+        // 自定义模板存在，用于覆盖胆结石、运动受伤这类没预设的场景
+        assertTrue(ts.any { it.custom })
+
+        // 宠物场景确实存在，且子项是宠物相关而非退烧药
+        val pet = ts.first { it.namePrefix.contains("宠物") }
+        assertTrue(pet.children.all { it.scene == "宠物" })
+        assertTrue(pet.children.none { it.name == "退烧药" })
+    }
+
+    @Test
+    fun `子项建议三种形态语义不混淆`() {
+        val fever = Templates.CHILD_PRESETS.first { it.name == "退烧药" }
+        assertEquals(3, fever.timesPerDay)
+        assertNull(fever.periodDays)
+
+        val vaccine = Templates.CHILD_PRESETS.first { it.name == "疫苗" }
+        assertNull(vaccine.timesPerDay)
+        assertEquals(21, vaccine.periodDays)
+
+        // 拆线是一次性：既不是每日几次，也不是每隔几天
+        val stitch = Templates.CHILD_PRESETS.first { it.name == "拆线" }
+        assertNull(stitch.timesPerDay)
+        assertNull(stitch.periodDays)
+        assertEquals(EventKind.ON_DEMAND, stitch.kind)
+    }
+
+    @Test
+    fun `子事件预设不只有吃药`() {
+        val scenes = Templates.CHILD_PRESETS.map { it.scene }.toSet()
+        // 至少覆盖用药之外的场景
+        assertTrue(scenes.contains("宠物"))
+        assertTrue(scenes.contains("术后恢复"))
+    }
+
+    // ---------- 无频次子事件的疗程进度 ----------
+
+    @Test
+    fun `全是周期型子事件时疗程仍能显示状态`() {
+        val curso = Event(id = 1, name = "宠物驱虫", kind = EventKind.COURSE)
+        // 一个逾期的周期型子事件（没有 timesPerDay）
+        val due = StatusCalculator.computeLite(
+            event = Event(id = 2, name = "疫苗", parentId = 1, targetDays = 21),
+            count = 2,
+            firstAsc = ts("2026-08-01T10:00"),
+            lastAsc = ts("2026-08-01T10:00"),
+            now = ts("2026-09-11T10:00")
+        )
+        assertEquals(Freshness.DUE, due.freshness)
+        val agg = StatusCalculator.aggregateCourseLite(
+            StatusCalculator.computeLite(
+                event = curso,
+                count = 0,
+                firstAsc = null,
+                lastAsc = null,
+                now = ts("2026-09-11T10:00")
+            ),
+            listOf(due)
+        )
+        // 分母为 0，不能返回 null 让卡片「没有状态」
+        val progress = StatusCalculator.courseProgress(agg)
+        assertNotNull(progress)
+        assertTrue(progress!!.contains("该做了"))
+        assertEquals(Freshness.DUE, agg.freshness)
     }
 }

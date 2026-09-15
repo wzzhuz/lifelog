@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.zwz.lifelog.data.LifeLogRepository
 import com.zwz.lifelog.ui.detail.DetailViewModel
+import com.zwz.lifelog.ui.edit.CoursePickViewModel
 import com.zwz.lifelog.ui.edit.EditViewModel
 import com.zwz.lifelog.ui.list.ListViewModel
 import com.zwz.lifelog.ui.timeline.TimelineViewModel
@@ -28,6 +29,8 @@ class LifeLogViewModelFactory(
             DetailViewModel(repo, eventId) as T
         modelClass.isAssignableFrom(EditViewModel::class.java) ->
             EditViewModel(repo, eventId, parentId) as T
+        modelClass.isAssignableFrom(CoursePickViewModel::class.java) ->
+            CoursePickViewModel(repo) as T
         else -> throw IllegalArgumentException("未知 ViewModel: ${modelClass.name}")
     }
 }

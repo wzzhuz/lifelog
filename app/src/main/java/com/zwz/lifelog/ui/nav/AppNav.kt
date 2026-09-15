@@ -20,8 +20,11 @@ import com.zwz.lifelog.di.ServiceLocator
 import com.zwz.lifelog.ui.detail.DetailScreen
 import com.zwz.lifelog.ui.detail.DetailViewModel
 import com.zwz.lifelog.ui.edit.AddRecordScreen
+import com.zwz.lifelog.ui.edit.CoursePickScreen
+import com.zwz.lifelog.ui.edit.CoursePickViewModel
 import com.zwz.lifelog.ui.edit.EditEventScreen
 import com.zwz.lifelog.ui.edit.EditViewModel
+import com.zwz.lifelog.domain.model.EventKind
 import com.zwz.lifelog.ui.list.ListScreen
 import com.zwz.lifelog.ui.list.ListViewModel
 import com.zwz.lifelog.ui.review.YearReviewScreen
@@ -42,6 +45,8 @@ object Route {
     const val YEAR_REVIEW = "year_review"
     const val USAGE_GUIDE = "usage_guide"
     const val ARCHIVED = "archived"
+    /** 「开疗程」：独立的模板选择页，与「记件事」分流。 */
+    const val COURSE_PICK = "course_pick"
 
     fun detail(eventId: Long) = "detail/$eventId"
     /** @param parentId 非 0 时新建的是该疗程下的子事件。 */
@@ -68,6 +73,7 @@ fun AppNav(
                 vm = vm,
                 onOpenDetail = { nav.navigate(Route.detail(it)) },
                 onCreateEvent = { nav.navigate(Route.editEvent(0L)) },
+                onCreateCourse = { nav.navigate(Route.COURSE_PICK) },
                 onOpenTimeline = { nav.navigate(Route.TIMELINE) },
                 onOpenSettings = { nav.navigate(Route.SETTINGS) },
                 onDataChanged = onDataChanged,
@@ -129,6 +135,22 @@ fun AppNav(
             )
         }
 
+        composable(Route.COURSE_PICK) {
+            val vm: CoursePickViewModel =
+                viewModel(factory = LifeLogViewModelFactory(repo))
+            CoursePickScreen(
+                vm = vm,
+                onBack = { nav.popBackStack() },
+                onCreated = { id ->
+                    onDataChanged()
+                    // 创建完直接进疗程页接着加药，路径连贯
+                    nav.navigate(Route.detail(id)) {
+                        popUpTo(Route.LIST) { inclusive = false }
+                    }
+                }
+            )
+        }
+
         composable(
             Route.EDIT_EVENT,
             arguments = listOf(
@@ -142,7 +164,18 @@ fun AppNav(
             EditEventScreen(
                 vm = vm,
                 onBack = { nav.popBackStack() },
-                onSaved = { nav.popBackStack(); onDataChanged() }
+                onSaved = { saved ->
+                    onDataChanged()
+                    // 疗程保存后直接进它的详情页——那里正好接着加药，
+                    // 路径连贯。普通事件与子事件回原处即可。
+                    if (saved.kind == EventKind.COURSE) {
+                        nav.navigate(Route.detail(saved.id)) {
+                            popUpTo(Route.LIST) { inclusive = false }
+                        }
+                    } else {
+                        nav.popBackStack()
+                    }
+                }
             )
         }
 

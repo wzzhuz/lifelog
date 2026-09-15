@@ -321,7 +321,14 @@ object StatusCalculator {
     /** 疗程的今日进度文案，如「今日 2/5」；无频次子事件时返回 null。 */
     fun courseProgress(parent: EventStatusLite): String? {
         val target = parent.children.sumOf { it.event.timesPerDay?.coerceAtLeast(0) ?: 0 }
-        if (target <= 0) return null
-        return "今日 ${parent.doneToday}/$target"
+        if (target > 0) return "今日 ${parent.doneToday}/$target"
+
+        // 没有频次型子事件（如「宠物驱虫」三针全是周期型）：
+        // 分母为 0，若直接返回 null，卡片会完全没有任何状态信息。
+        // 退而报出最紧急的那一项，至少让用户知道该看哪一个。
+        val urgent = parent.children.maxByOrNull { priority(it.freshness) }
+        return urgent
+            ?.takeIf { it.freshness == Freshness.DUE || it.freshness == Freshness.SOON }
+            ?.let { "${it.event.name} · 该做了" }
     }
 }
